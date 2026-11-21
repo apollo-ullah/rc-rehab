@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Head Racer Screen</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Nunito:wght@500;600;700;800;900&display=swap" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
+  <style>
+    .side {
+      position: fixed; top: 16px; right: 16px; bottom: 16px; width: 360px;
+      display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 2px 4px 8px 2px;
+    }
+    .side .panel { padding: 16px 18px; }
+    .side h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font: 700 30px/1 var(--hand); }
+    .side h3 .icon { width: 22px; height: 22px; color: var(--teal); }
+    .qr { display: flex; gap: 14px; align-items: center; }
+    .qr img { width: 128px; height: 128px; background: #fff; padding: 6px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--line); flex: none; }
+    .qr h2 { font: 700 40px/0.95 var(--hand); margin-bottom: 6px; }
+    .url { font-size: 12px; color: var(--ink-3); word-break: break-all; margin-top: 6px; font-weight: 700; }
+    ol.board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    ol.board li { display: grid; grid-template-columns: 30px 1fr auto; align-items: baseline; gap: 8px; padding: 7px 0; border-bottom: 1.5px dashed var(--line); }
+    ol.board li:last-child { border-bottom: 0; }
+    ol.board .n { font: 900 16px/1 var(--ui); color: var(--ink-3); }
+    ol.board .name { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ol.board .t { font: 900 17px/1 var(--ui); font-variant-numeric: tabular-nums; }
+    ol.board li.first .n, ol.board li.first .t { color: var(--coral); }
+    ol.board .empty { display: block; color: var(--ink-3); border: 0; font-size: 15px; }
+    .tag { font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: var(--wash); color: var(--ink-2); margin-left: 6px; vertical-align: 2px; }
+    .status { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 15px; }
+    .status .lamp { width: 12px; height: 12px; }
+    .now {
+      position: fixed; left: 20px; top: 20px; display: flex; align-items: center; gap: 16px; max-width: calc(100% - 430px);
+      padding: 14px 20px; font: 800 24px/1.1 var(--ui);
+    }
+    .now .time { color: var(--coral); font-variant-numeric: tabular-nums; font-weight: 900; }
+    .now .stars { display: inline-flex; align-items: center; gap: 6px; }
+    .now .stars .icon { color: var(--sun); }
+    .now .lvl { font: 800 15px/1 var(--ui); background: var(--sun-soft); color: var(--sun-deep); padding: 6px 9px; border-radius: 6px; }
+    .course-name { position: fixed; left: 24px; bottom: 20px; font: 700 44px/1 var(--hand); color: var(--ink); text-shadow: 0 2px 0 rgba(255,255,255,0.8); pointer-events: none; }
+    .today-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    .today-stats div { background: var(--wash); padding: 10px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--line); display: flex; flex-direction: column; gap: 4px; }
+    .today-stats b { font: 900 32px/1 var(--ui); font-variant-numeric: tabular-nums; }
+    .today-stats span { font-size: 12px; color: var(--ink-3); font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+    ul.feed { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--ink-2); font-weight: 700; }
+    ul.feed b { color: var(--ink); }
+    .csv { font-size: 14px; color: var(--teal-deep); text-align: center; font-weight: 800; }
+    #big { right: 392px; }
+    #big.msg { font: 700 84px/1 var(--hand); white-space: pre-line; color: #fff; }
+    @media (max-width: 900px) {
+      .side { position: static; width: auto; margin: 60vh 12px 12px; overflow: visible; }
+      body { overflow: auto; }
+      #world { height: 60vh; }
+      #big { right: 0; bottom: 40vh; }
+      .now { max-width: calc(100% - 40px); }
+      .course-name { bottom: auto; top: calc(60vh - 60px); }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="world" aria-hidden="true"></canvas>
+  <div class="panel now" id="now" role="status">Waiting for a driver</div>
+  <div class="course-name" id="course-name"></div>
+  <div class="overlay" id="big" aria-live="polite"></div>
+
+  <aside class="side">
+    <div class="panel qr">
+      <img id="qr" class="hidden" alt="QR code that opens the game on your phone" />
+      <div>
+        <h2>Scan to play</h2>
+        <p class="hint">Short head and face exercises on little race courses. Every boss race drives the real car.</p>
+        <div class="url" id="url"></div>
+      </div>
+    </div>
+    <div class="panel status"><span class="lamp" id="car-lamp"></span><span id="car-text">Real car offline</span></div>
+    <div class="panel">
+      <h3 data-icon="bolt">Today's practice</h3>
+      <div class="today-stats">
+        <div><b id="pr-reps">0</b><span>gates opened</span></div>
+        <div><b id="pr-min">0</b><span>minutes</span></div>
+      </div>
+      <ol class="board" id="pr-people"><li class="empty">No practice yet today.</li></ol>
+      <ul class="feed" id="pr-feed"></ul>
+    </div>
+    <div class="panel">
+      <h3 data-icon="trophy">Fastest Grand Prix</h3>
+      <ol class="board" id="fastest"><li class="empty">No finished runs yet. Be the first.</li></ol>
+    </div>
+    <div class="panel">
+      <h3 data-icon="up">Most improved</h3>
+      <ol class="board" id="improved"><li class="empty">Race twice to show up here.</li></ol>
+    </div>
+    <div class="panel">
+      <h3 data-icon="people">Up next</h3>
+      <ol class="board" id="queue"><li class="empty">Nobody in line.</li></ol>
+    </div>
+    <div class="panel hidden" id="admin">
+      <h3 data-icon="gear">Host</h3>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn danger" id="btn-stop"><span data-icon="stop">Stop car and end run</span></button>
+        <button class="btn quiet" id="btn-clear"><span>Clear the line</span></button>
+        <a class="csv" id="csv" href="#" download>Download practice log (CSV)</a>
+      </div>
+    </div>
+  </aside>
+  <script type="module" src="screen.js"></script>
+</body>
+</html>

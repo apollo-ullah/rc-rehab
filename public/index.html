@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#e9f1ec" />
+  <meta name="description" content="Short daily head and face exercises. Every lesson is its own little course that drives a real RC car." />
+  <title>Head Racer</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Nunito:wght@500;600;700;800;900&display=swap" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
+</head>
+<body>
+  <canvas id="world" aria-hidden="true"></canvas>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <!-- 1. Welcome -->
+  <section class="screen active" id="s-name">
+    <div class="panel sheet welcome">
+      <p class="hand tilt">welcome to</p>
+      <h1 class="title">Head Racer</h1>
+      <p>Short daily head and face exercises. Every lesson is its own little course: open each gate with your move, then drive on to the finish line.</p>
+      <div class="field">
+        <label for="name">Your name</label>
+        <input id="name" type="text" maxlength="20" autocomplete="off" autocapitalize="words" enterkeyhint="go" placeholder="Type your name" />
+        <p class="hint">Your progress is saved under this name, so you can carry on from any phone.</p>
+      </div>
+      <p class="error hidden" id="name-error" role="alert"></p>
+      <button class="btn primary" id="btn-name"><span>Let's go</span></button>
+      <p class="fine">Practise seated with good support. A practice tool to use alongside therapy, not a medical device.</p>
+    </div>
+  </section>
+
+  <!-- 2. Camera -->
+  <section class="screen" id="s-camera">
+    <div class="panel sheet">
+      <p class="eyebrow">Step 1 of 2</p>
+      <h2 class="title">Turn on your camera</h2>
+      <p>Your phone watches your head and face to read your moves. The video stays on this phone. It is never recorded or sent anywhere.</p>
+      <div class="cam" id="cam-slot-camera"></div>
+      <p class="hint" id="camera-status" role="status"></p>
+      <p class="error hidden" id="camera-error" role="alert"></p>
+      <button class="btn primary" id="btn-camera"><span data-icon="camera">Turn on camera</span></button>
+      <button class="btn quiet" id="btn-touch"><span data-icon="hand">Use touch controls instead</span></button>
+    </div>
+  </section>
+
+  <!-- 3. Head setup / measuring a face range -->
+  <section class="screen" id="s-cal">
+    <div class="panel sheet">
+      <p class="eyebrow" id="cal-step" role="status">Step 2 of 2</p>
+      <div class="cam big" id="cam-slot-cal"><span class="badge" id="cal-badge" data-icon="search">Looking for you</span></div>
+      <h2 class="title" id="cal-title">Get ready</h2>
+      <p id="cal-sub"></p>
+      <div class="bar" aria-hidden="true"><i id="cal-progress"></i></div>
+      <p class="error hidden" id="cal-error" role="alert"></p>
+      <button class="btn primary hidden" id="btn-cal-retry"><span>Try again</span></button>
+      <button class="btn quiet hidden" id="btn-cal-back"><span>Back to the roadmap</span></button>
+    </div>
+  </section>
+
+  <!-- 4. Home: the roadmap -->
+  <section class="screen" id="s-home">
+    <header class="topbar">
+      <button class="me" id="btn-me" aria-label="Your progress">
+        <span class="avatar" id="h-avatar">?</span>
+        <span class="me-text"><b id="h-name">You</b><span class="lvl"><span id="h-level">Level 1</span><span class="mini-bar"><i id="h-level-bar"></i></span></span></span>
+      </button>
+      <span class="chip" data-icon="flame" id="h-streak-chip" aria-label="Week streak"><span id="h-streak">0</span></span>
+      <span class="chip xp" data-icon="bolt" aria-label="XP"><span id="h-xp">0</span></span>
+      <button class="sq" id="btn-menu" aria-label="Menu" data-icon="menu"></button>
+    </header>
+    <div class="home-scroll" id="home-scroll">
+      <div class="hero-space" aria-hidden="true">
+        <p class="hand hero-note" id="h-hero-note">your next course</p>
+      </div>
+
+      <section class="panel up-next" aria-labelledby="h-next-title">
+        <div class="up-next-head">
+          <span class="unit-tag" id="h-next-unit">Unit 1 · Hold steady</span>
+          <span class="hand" id="h-next-tag">up next</span>
+        </div>
+        <h2 class="title" id="h-next-title">Find it</h2>
+        <p class="course-line" id="h-next-course"></p>
+        <p id="h-next-what"></p>
+        <button class="btn primary big" id="btn-continue"><span data-icon="play">Start</span></button>
+        <div class="today">
+          <div class="ring" id="h-ring" style="--p: 0"><span id="h-ring-text">0</span></div>
+          <div class="today-text">
+            <b id="h-today">0 of 10 min today</b>
+            <div class="days" id="h-days" aria-hidden="true"></div>
+            <p class="hint" id="h-streak-text"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel roadmap" aria-labelledby="h-map-title">
+        <div class="panel-head">
+          <h2 class="title" id="h-map-title">Roadmap</h2>
+          <span class="count" id="h-map-count">0 / 24 stops</span>
+        </div>
+        <div class="bar"><i id="h-map-bar"></i></div>
+        <p class="hint">Everything is open. Play in any order. The path just suggests one.</p>
+        <nav class="unit-tabs" id="h-unit-tabs" aria-label="Jump to a unit"></nav>
+        <p class="progress-line hidden" id="h-progress"></p>
+        <div class="map" id="map"></div>
+        <ul class="legend" aria-label="Legend">
+          <li><span class="dia s-open"></span>Not played</li>
+          <li><span class="dia s-done"></span>Done</li>
+          <li><span class="dia s-gold"></span>Gold: 80%+ on two days</li>
+          <li><span class="dia s-boss"></span>Boss race</li>
+        </ul>
+      </section>
+    </div>
+  </section>
+
+  <!-- 5. One stop on the roadmap: a lesson, a boss race or the Grand Prix -->
+  <section class="screen" id="s-stop">
+    <div class="panel sheet stop-sheet" role="dialog" aria-labelledby="st-title">
+      <button class="sq close" id="btn-stop-close" aria-label="Close" data-icon="close"></button>
+      <p class="eyebrow" id="st-unit"></p>
+      <h2 class="title" id="st-title"></h2>
+      <p class="course-line" id="st-course"></p>
+      <p id="st-what"></p>
+      <div class="course-card">
+        <svg class="course-svg" id="st-svg" viewBox="0 0 120 80" aria-hidden="true"></svg>
+        <div class="course-facts" id="st-course-facts"></div>
+      </div>
+      <div class="facts" id="st-facts"></div>
+      <p class="note hidden" id="st-note"></p>
+      <div class="actions" id="st-actions"></div>
+    </div>
+  </section>
+
+  <!-- 6. Lesson on its course -->
+  <section class="screen hud" id="s-lesson">
+    <div class="touch-pad hidden" id="touch-pad-lesson"></div>
+    <div class="hud-top">
+      <button class="sq light" id="btn-l-quit" aria-label="Stop the lesson" data-icon="close"></button>
+      <div class="course-bar panel slim">
+        <div class="cb-head"><b id="l-course">Course</b><span id="l-count">Gate 1 of 10</span></div>
+        <div class="cb-track" id="l-track" aria-hidden="true"><i class="cb-fill" id="l-fill"></i><span class="cb-car" id="l-car"></span></div>
+      </div>
+    </div>
+    <div class="cue-card" aria-live="polite">
+      <div class="cue" id="l-cue"></div>
+      <div class="cue-sub" id="l-sub"></div>
+    </div>
+    <div class="hud-bottom">
+      <div class="fatigue panel slim hidden" id="l-fatigue" role="status">
+        <span>Looks like you're getting tired. Rest is part of training.</span>
+        <button class="btn small quiet" id="btn-l-finish"><span>Finish now</span></button>
+      </div>
+      <div class="meter-card panel slim">
+        <div class="meter-main">
+          <div class="gauge" id="l-gauge"><div class="band" id="l-band"></div><div class="mid"></div><div class="dot" id="l-dot"></div></div>
+          <div class="pad2d hidden" id="l-pad"><div class="zone" id="l-zone"></div><div class="dot" id="l-pdot"></div></div>
+          <div class="hold-row"><span class="hint" id="l-hold-label">Hold</span><div class="bar sun"><i id="l-hold"></i></div></div>
+        </div>
+        <div class="cam" id="cam-slot-lesson"></div>
+      </div>
+      <div class="row">
+        <button class="btn quiet" id="btn-meter"><span data-icon="eye">Hide meter</span></button>
+        <button class="btn quiet" id="btn-tired"><span data-icon="moon">I'm tired</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Lesson complete + rest -->
+  <section class="screen" id="s-done">
+    <div class="panel sheet">
+      <p class="eyebrow" id="d-unit"></p>
+      <h2 class="title" id="d-title">Course complete</h2>
+      <div class="score-row">
+        <div class="score"><b id="d-score">0/10</b><span>gates opened</span></div>
+        <div class="chip xp big" data-icon="bolt"><span id="d-xp">+0 XP</span></div>
+      </div>
+      <div class="gate-row" id="d-gates" aria-hidden="true"></div>
+      <p class="banner hidden" id="d-banner"></p>
+      <p id="d-change"></p>
+      <p class="hint hidden" id="d-fatigue"></p>
+      <p class="progress-line hidden" id="d-progress"></p>
+      <div class="meter-label"><span>Today</span><span id="d-today"></span></div>
+      <div class="bar"><i id="d-goal"></i></div>
+      <div class="rest-card" id="d-rest">
+        <div class="breath" aria-hidden="true"></div>
+        <div>
+          <b id="d-rest-title">Rest 30 s</b>
+          <p class="hint" id="d-rest-sub">Breathe in slowly.</p>
+        </div>
+      </div>
+      <button class="btn primary" id="btn-next"><span>Next</span></button>
+      <button class="btn quiet" id="btn-to-path"><span data-icon="map">Back to the roadmap</span></button>
+    </div>
+  </section>
+
+  <!-- 8. Waiting in line for the real car -->
+  <section class="screen" id="s-wait">
+    <div class="panel sheet">
+      <p class="eyebrow" id="wait-level"></p>
+      <h2 class="title">You're in line</h2>
+      <p class="queue-pos" id="wait-pos" role="status">Joining…</p>
+      <p id="wait-howto"></p>
+      <div class="wait-meters">
+        <div class="wm">
+          <div class="meter-label"><span data-icon="left">Left</span><span>Steer</span><span>Right</span></div>
+          <div class="gauge bi"><div class="mid"></div><div class="dot" id="w-steer"></div></div>
+          <div class="meter-label"><span>Go</span><span id="w-go-label"></span></div>
+          <div class="bar"><i id="w-go"></i></div>
+        </div>
+        <div class="cam small" id="cam-slot-wait"><span class="badge" id="wait-badge"></span></div>
+      </div>
+      <fieldset class="seg" id="sens-choices">
+        <legend>Steering feel</legend>
+        <label><input type="radio" name="sens" value="gentle" /><b>Gentle</b><small>Big moves to turn</small></label>
+        <label><input type="radio" name="sens" value="normal" checked /><b>Normal</b><small>In between</small></label>
+        <label><input type="radio" name="sens" value="sharp" /><b>Sharp</b><small>Small moves turn</small></label>
+      </fieldset>
+      <div class="row">
+        <button class="btn quiet" id="btn-recal"><span>Redo setup</span></button>
+        <button class="btn quiet" id="btn-local"><span data-icon="phone">Play on phone</span></button>
+        <button class="btn quiet" id="btn-leave"><span>Leave line</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. Your turn -->
+  <section class="screen" id="s-turn">
+    <div class="panel sheet">
+      <p class="hand tilt">it's your turn</p>
+      <h1 class="title">Ready?</h1>
+      <p>Find the real car, then keep your face in view of the camera.</p>
+      <button class="btn primary huge" id="btn-start"><span data-icon="play">Start</span></button>
+      <p class="hint" id="turn-hold-hint">Or hold your GO move for a second.</p>
+      <div class="bar"><i id="turn-hold"></i></div>
+      <p class="hint" id="turn-timer" role="status"></p>
+    </div>
+  </section>
+
+  <!-- 10. Race -->
+  <section class="screen hud" id="s-race">
+    <div class="touch-pad hidden" id="touch-pad"></div>
+    <div class="hud-top">
+      <div class="panel slim race-chips">
+        <span class="chip clear" data-icon="clock"><span id="hud-time" aria-label="Race time">0.0</span></span>
+        <span class="chip clear" data-icon="star"><span id="hud-stars">0/10</span></span>
+        <span class="race-name" id="hud-name"></span>
+      </div>
+      <canvas id="minimap" width="240" height="160" aria-hidden="true"></canvas>
+    </div>
+    <div class="hud-bottom">
+      <div class="meter-card panel slim">
+        <div class="meter-main">
+          <div class="gauge bi" id="r-steer-wrap"><div class="mid"></div><div class="dot" id="r-steer"></div></div>
+          <div class="hold-row"><span class="hint" id="r-go-label">Go</span><div class="bar"><i id="r-go"></i></div></div>
+        </div>
+        <div class="cam" id="cam-slot-race"></div>
+      </div>
+      <button class="btn danger" id="btn-stop"><span data-icon="stop">Stop</span></button>
+    </div>
+  </section>
+
+  <!-- 11. Race result -->
+  <section class="screen" id="s-result">
+    <div class="panel sheet">
+      <p class="eyebrow" id="res-level"></p>
+      <h2 class="title" id="res-title">Finished</h2>
+      <div class="score"><b id="res-time"></b><span>final time</span></div>
+      <p class="banner" id="res-banner"></p>
+      <p id="res-detail"></p>
+      <h3 class="small-head" id="res-stats-title">Your workout</h3>
+      <div class="facts" id="res-stats"></div>
+      <button class="btn primary" id="btn-res-path"><span data-icon="map">Back to the roadmap</span></button>
+      <button class="btn quiet" id="btn-again"><span>Race again</span></button>
+    </div>
+  </section>
+
+  <!-- 12. Menu: progress, achievements, settings, about -->
+  <section class="screen" id="s-menu">
+    <div class="panel sheet menu-sheet" role="dialog" aria-label="Menu">
+      <div class="tabs" role="tablist">
+        <button class="tab sq" role="tab" data-tab="progress" aria-label="Progress" data-icon="chart"></button>
+        <button class="tab sq" role="tab" data-tab="awards" aria-label="Achievements" data-icon="medal"></button>
+        <button class="tab sq" role="tab" data-tab="settings" aria-label="Settings" data-icon="gear"></button>
+        <button class="tab sq" role="tab" data-tab="about" aria-label="About" data-icon="info"></button>
+        <button class="sq close" id="btn-menu-close" aria-label="Close" data-icon="close"></button>
+      </div>
+
+      <div class="tab-body" data-body="progress">
+        <h2 class="title">Your progress</h2>
+        <div class="tiles" id="m-tiles"></div>
+        <h3 class="small-head">Last two weeks</h3>
+        <div class="chart" id="m-chart" aria-label="Minutes practised per day"></div>
+        <p class="hint" id="m-chart-note"></p>
+        <h3 class="small-head">Your range</h3>
+        <div class="ranges" id="m-ranges"></div>
+        <h3 class="small-head">Lessons</h3>
+        <div class="mastery" id="m-mastery"></div>
+      </div>
+
+      <div class="tab-body" data-body="awards">
+        <h2 class="title">Achievements</h2>
+        <p class="hint" id="m-awards-count"></p>
+        <ul class="awards" id="m-awards"></ul>
+      </div>
+
+      <div class="tab-body" data-body="settings">
+        <h2 class="title">Settings</h2>
+        <fieldset class="seg four">
+          <legend>Daily goal</legend>
+          <label><input type="radio" name="goal" value="5" /><b>5 min</b><small>Easy</small></label>
+          <label><input type="radio" name="goal" value="10" checked /><b>10 min</b><small>Regular</small></label>
+          <label><input type="radio" name="goal" value="15" /><b>15 min</b><small>Serious</small></label>
+          <label><input type="radio" name="goal" value="20" /><b>20 min</b><small>Intense</small></label>
+        </fieldset>
+        <fieldset class="seg">
+          <legend>Goal days per week</legend>
+          <label><input type="radio" name="dpw" value="3" /><b>3 days</b><small>Lots of rest</small></label>
+          <label><input type="radio" name="dpw" value="4" checked /><b>4 days</b><small>Suggested</small></label>
+          <label><input type="radio" name="dpw" value="5" /><b>5 days</b><small>Most days</small></label>
+        </fieldset>
+        <fieldset class="seg two">
+          <legend>Target size</legend>
+          <label><input type="radio" name="wide" value="0" checked /><b>Normal</b><small>Standard zones</small></label>
+          <label><input type="radio" name="wide" value="1" /><b>Bigger</b><small>Helps with extra movements</small></label>
+        </fieldset>
+        <fieldset class="seg">
+          <legend>Driving help in races</legend>
+          <label><input type="radio" name="assist" value="0" checked /><b>None</b><small>Full speed</small></label>
+          <label><input type="radio" name="assist" value="1" /><b>Some</b><small>Slower, helps steer</small></label>
+          <label><input type="radio" name="assist" value="2" /><b>Lots</b><small>Drives forward</small></label>
+        </fieldset>
+        <p class="hint" id="m-controls"></p>
+        <div class="row">
+          <button class="btn quiet" id="btn-m-recal"><span data-icon="head">Redo head setup</span></button>
+          <button class="btn quiet" id="btn-m-controls"><span data-icon="hand">Switch controls</span></button>
+        </div>
+        <button class="btn quiet" id="btn-m-name"><span>Change name</span></button>
+      </div>
+
+      <div class="tab-body" data-body="about">
+        <h2 class="title">How it works</h2>
+        <ul class="about">
+          <li><b>Four units</b>, each a different move: holding your head steady, turning left and right, opening and closing your jaw, and your lips.</li>
+          <li><b>Five lessons per unit</b>: Find it, Hold it, Aim it, Quick and Mix. Each lesson is its own course with 10 gates. Do the move at a gate to open it. A miss still opens it, and the lesson ends at the finish line.</li>
+          <li><b>Boss races</b> drive the real RC car using only that unit's move. You can also play them on this phone.</li>
+          <li><b>It adapts to you.</b> Targets are a share of your own range. 90% or better makes the next go a little harder; under 60% makes it easier.</li>
+          <li><b>Rest is training.</b> "I'm tired" always ends a lesson with credit. There are no lives to lose, and your weekly streak has rest days built in.</li>
+        </ul>
+        <p class="note">Practise seated with good support, and stop if anything hurts or you feel dizzy. A therapist should choose which units fit you. The mouth units are control practice, not a treatment for speech, drooling or eating. Video never leaves this phone.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="overlay" id="race-overlay" aria-live="assertive"></div>
+  <video id="cam" playsinline muted autoplay></video>
+  <script type="module" src="player.js"></script>
+</body>
+</html>

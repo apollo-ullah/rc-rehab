@@ -1,0 +1,1549 @@
+import { newCar, step, autoSteer, STAR_BONUS_MS, ASSIST } from './game.js';
+import { HeadTracker, buildCalibration, toIntent, toSignals, rangeFrom, rangeFromCalibration } from './head.js';
+import {
+  UNITS, KINDS, GRAND_PRIX, XP, FACE_SIGS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode,
+  isGold, difficultyText, recordLesson, recordBoss, addPractice, todayView, weekView, progressLine, levelName,
+  unitIndex, localDay, addDays, newer, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
+} from './path.js';
+import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
+import { LessonCourse } from './course.js';
+import { mountIcons, iconSvg } from './icons.js';
+
+const $ = (id) => document.getElementById(id);
+const AUTOPILOT = new URLSearchParams(location.search).has('autopilot');
+const video = $('cam');
+const tracker = new HeadTracker(video);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const COLOR_CLASS = ['c-sky', 'c-mint', 'c-coral', 'c-sun'];
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+
+// ---------- App state ----------
+const S = {
+  name: store.get('rc-name') || '',
+  assist: 0,
+  sens: store.get('rc-sens') || 'normal',
+  mode: 'head', // 'head' | 'touch'
+  cal: null,
+  profile: null,
+  level: 'gp', // which race: 'gp' or a unit id for that unit's boss race
+  track: raceTrack('gp'),
+  local: false, // a race played on this phone only: no line, no real car
+  queued: false,
+  phase: 'setup', // setup | home | lesson | lessondone | waiting | turn | countdown | racing | done
+  car: null,
+  raceStart: 0,
+  lastSend: 0,
+  stats: null,
+  intent: { steer: 0, go: 0, lost: false },
+  sig: null,
+  lesson: null,
+  stop: null,
+  retry: null,
+  touch: { active: false, x0: 0, x: 0, y0: 0, y: 0 },
+  keys: new Set(),
+  holdStart: 0,
+  claimEnds: 0,
+  puckerUp: false,
+  lastBoost: 0,
+  restTimer: null,
+  timers: [],
+  carOnline: false,
+  lineLength: 0,
+  lineBusy: false,
+};
+$('name').value = S.name;
+const sensRadio = document.querySelector(`input[name=sens][value="${S.sens}"]`);
+if (sensRadio) sensRadio.checked = true;
+document.querySelectorAll('input[name=sens]').forEach((r) =>
+  r.addEventListener('change', () => {
+    S.sens = r.value;
+    store.set('rc-sens', r.value);
+  }),
+);
+const fillBar = (id, f) => ($(id).style.width = `${Math.round(clamp(f, 0, 1) * 1000) / 10}%`);
+mountIcons();
+
+// ---------- Toasts ----------
+function toast(text, { icon = 'star', kind = '' } = {}) {
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.setAttribute('role', 'status');
+  el.innerHTML = `${iconSvg(icon)}<span>${esc(text)}</span>`;
+  $('toasts').append(el);
+  setTimeout(() => el.classList.add('out'), 2600);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// ---------- 3D world ----------
+let world = null;
+let wanted = { track: raceTrack('gp'), mode: 'showcase', bottom: 0.55 };
+function scene(track, mode, bottom = 0) {
+  wanted = { track, mode, bottom };
+  if (!world) return;
+  world.setTrack(track);
+  world.setMode(mode);
+  world.setInset({ bottom });
+}
+import('./world3d.js')
+  .then(({ createWorld }) => {
+    world = createWorld($('world'), { mode: wanted.mode, track: wanted.track, inset: { bottom: wanted.bottom } });
+    addEventListener('resize', () => world.resize());
+    if (S.phase === 'lesson' && S.lesson) S.lesson.course.gates.forEach((g, i) => world.setGate(i, g.state));
+  })
+  .catch((e) => console.warn('3D world unavailable', e));
+
+// ---------- Screens ----------
+const CAM_SLOTS = { 's-camera': 'cam-slot-camera', 's-cal': 'cam-slot-cal', 's-wait': 'cam-slot-wait', 's-race': 'cam-slot-race', 's-lesson': 'cam-slot-lesson' };
+function show(id) {
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
+  const slot = CAM_SLOTS[id];
+  if (slot && S.mode === 'head') {
+    $(slot).prepend(video);
+    video.play().catch(() => {});
+  }
+  const touch = S.mode === 'touch';
+  $('cam-slot-race').classList.toggle('hidden', touch);
+  $('cam-slot-lesson').classList.toggle('hidden', touch);
+  $('touch-pad').classList.toggle('hidden', !touch);
+  $('touch-pad-lesson').classList.toggle('hidden', !touch);
+}
+
+function overlay(text, msg = false) {
+  const el = $('race-overlay');
+  if (el.textContent === text && el.classList.contains('msg') === msg) return;
+  el.textContent = text;
+  el.className = `overlay${msg ? ' msg' : ''}`;
+  if (text && !msg) {
+    void el.offsetWidth; // restart the pop
+    el.classList.add('pop');
+  }
+}
+
+// ---------- Server connection ----------
+let ws = null;
+function connect() {
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => {
+    send({ t: 'hello', role: 'player', id: store.get('rc-id') });
+    if (S.queued && S.phase === 'waiting') joinQueue();
+  };
+  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
+  ws.onclose = () => {
+    if (!S.local && (S.phase === 'racing' || S.phase === 'countdown')) endLocalRun('The connection dropped, so your run was stopped.');
+    setTimeout(connect, 1000);
+  };
+}
+const send = (m) => ws?.readyState === 1 && ws.send(JSON.stringify(m));
+
+function onMessage(m) {
+  switch (m.t) {
+    case 'hello':
+      store.set('rc-id', m.id);
+      break;
+    case 'lobby': {
+      const was = S.carOnline;
+      S.carOnline = !!m.carOnline;
+      S.lineLength = m.queue?.length || 0;
+      S.lineBusy = !!m.current;
+      if (S.phase === 'waiting') {
+        const who = m.current ? `${m.current.name} is driving.` : 'The track is free.';
+        let text = m.pos ? `You're #${m.pos} in line. ${who}` : who;
+        if (!m.carOnline) text += ' The real car is offline, so this run is on screen only.';
+        $('wait-pos').textContent = text;
+      }
+      if ($('s-stop').classList.contains('active')) renderCarStatus();
+      if (was !== S.carOnline && S.phase === 'home') toast(S.carOnline ? 'The real car is connected' : 'The real car went offline', { icon: 'car' });
+      break;
+    }
+    case 'your_turn':
+      S.phase = 'turn';
+      S.queued = false;
+      S.claimEnds = performance.now() + m.claimMs;
+      S.holdStart = 0;
+      show('s-turn');
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      break;
+    case 'countdown':
+      if (S.local) break;
+      if (S.phase !== 'countdown') startCountdownView();
+      overlay(String(m.n));
+      break;
+    case 'go':
+      if (!S.local) goNow();
+      break;
+    case 'run_end':
+      if (S.local) break;
+      endLocalRun(
+        {
+          stopped: 'You stopped the run.',
+          timeout: 'Time ran out. You can try again from the roadmap.',
+          disconnected: 'The connection dropped, so your run was stopped.',
+          stopped_by_host: 'The host stopped the run.',
+          missed_turn: 'Your turn timed out. Join the line again when you are ready.',
+          left: 'You left the line.',
+        }[m.reason] || 'Run ended.',
+      );
+      break;
+    case 'result':
+      if (!S.local) showResult(m);
+      break;
+  }
+}
+
+// ---------- Profile: saved on this phone and on the laptop, by name ----------
+const profileKey = (name) => `rc-profile:${name.toLowerCase()}`;
+function loadLocalProfile(name) {
+  try {
+    return JSON.parse(store.get(profileKey(name)));
+  } catch {
+    return null;
+  }
+}
+async function loadProfile(name) {
+  let p = loadLocalProfile(name);
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2500);
+    const r = await fetch(`/api/profile?name=${encodeURIComponent(name)}`, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (r.ok) p = newer(p, await r.json());
+  } catch { /* offline: this phone's copy is fine */ }
+  S.profile = { ...newProfile(name, localDay()), ...(p || {}), name };
+  S.assist = ASSIST[S.profile.assist] ? S.profile.assist : 0;
+  applySettings();
+}
+function saveProfile() {
+  const p = S.profile;
+  if (!p) return;
+  p.updatedAt = Date.now();
+  store.set(profileKey(p.name), JSON.stringify(p));
+  fetch('/api/profile', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: p.name, profile: p }),
+  }).catch(() => {});
+}
+
+function applySettings() {
+  const p = S.profile;
+  const check = (name, value) => {
+    const el = document.querySelector(`input[name=${name}][value="${value}"]`);
+    if (el) el.checked = true;
+  };
+  check('goal', p.goalMin);
+  check('dpw', p.daysPerWeek);
+  check('wide', p.wide ? 1 : 0);
+  check('assist', S.assist);
+}
+const onSetting = (name, fn) =>
+  document.querySelectorAll(`input[name=${name}]`).forEach((r) =>
+    r.addEventListener('change', () => {
+      if (!S.profile) return;
+      fn(r.value);
+      const d = S.profile.days[localDay()];
+      if (d) d.goalMet = d.goalMet || d.ms >= S.profile.goalMin * 60000;
+      saveProfile();
+      renderHome();
+      renderMenu();
+    }),
+  );
+onSetting('goal', (v) => (S.profile.goalMin = Number(v)));
+onSetting('dpw', (v) => (S.profile.daysPerWeek = Number(v)));
+onSetting('wide', (v) => (S.profile.wide = v === '1'));
+onSetting('assist', (v) => (S.assist = S.profile.assist = Number(v)));
+
+// Celebrate achievements that this action completed.
+function withAwards(fn) {
+  const before = new Set(achievements(S.profile).filter((a) => a.done).map((a) => a.id));
+  const out = fn();
+  achievements(S.profile)
+    .filter((a) => a.done && !before.has(a.id))
+    .forEach((a, i) => setTimeout(() => toast(`Achievement: ${a.title}`, { icon: 'medal', kind: 'gold' }), 1200 + i * 900));
+  return out;
+}
+
+// ---------- Step 1: name ----------
+$('btn-name').onclick = async () => {
+  const name = $('name').value.replace(/\s+/g, ' ').trim();
+  if (!name) {
+    $('name-error').textContent = 'Type a name so your progress can be saved.';
+    $('name-error').classList.remove('hidden');
+    $('name').focus();
+    return;
+  }
+  $('name-error').classList.add('hidden');
+  S.name = name;
+  store.set('rc-name', name);
+  $('btn-name').disabled = true;
+  await loadProfile(name);
+  $('btn-name').disabled = false;
+  if (S.mode === 'touch' || (tracker.lm && S.cal)) return goHome();
+  show('s-camera');
+};
+$('name').addEventListener('keydown', (e) => e.key === 'Enter' && $('btn-name').click());
+
+// ---------- Step 2: camera ----------
+$('btn-camera').onclick = async () => {
+  $('btn-camera').disabled = true;
+  $('camera-error').classList.add('hidden');
+  try {
+    S.mode = 'head';
+    show('s-camera');
+    await tracker.start((s) => ($('camera-status').textContent = s));
+    keepAwake();
+    runCalibration(goHome);
+  } catch (e) {
+    console.error(e);
+    $('camera-status').textContent = '';
+    $('camera-error').textContent =
+      e?.name === 'NotAllowedError'
+        ? 'Camera access is blocked. Allow the camera for this site in your browser settings, then try again.'
+        : `Face tracking could not start (${e?.message || e}). You can use touch controls instead.`;
+    $('camera-error').classList.remove('hidden');
+  } finally {
+    $('btn-camera').disabled = false;
+  }
+};
+
+$('btn-touch').onclick = () => {
+  S.mode = 'touch';
+  S.cal = null;
+  keepAwake();
+  goHome();
+};
+
+// ---------- Step 3: head setup (and measuring face ranges) ----------
+const CAL_STEPS = [
+  { key: 'neutral', title: 'Relax', sub: 'Look at the screen and keep your head still.' },
+  { key: 'left', title: 'Steer left', sub: 'Tilt or turn your head to the left, whichever is comfortable, and hold it.' },
+  { key: 'right', title: 'Steer right', sub: 'Now the same to the right, and hold it.' },
+  { key: 'go', title: 'Your GO move', sub: 'Open your mouth, raise your eyebrows or smile. Pick one and hold it.' },
+];
+
+function calScreen() {
+  S.phase = 'setup';
+  show('s-cal');
+  scene(raceTrack('gp'), 'showcase', 0.55);
+  $('cal-error').classList.add('hidden');
+  $('btn-cal-retry').classList.add('hidden');
+  $('btn-cal-back').classList.add('hidden');
+}
+function calFail(why, canGoBack) {
+  $('cal-title').textContent = 'Try that again';
+  $('cal-sub').textContent = '';
+  $('cal-error').textContent = why;
+  $('cal-error').classList.remove('hidden');
+  $('btn-cal-retry').classList.remove('hidden');
+  // Without a finished head setup there's nothing to go back to, so offer touch controls instead.
+  $('btn-cal-back').innerHTML = `<span>${canGoBack ? 'Back to the roadmap' : 'Use touch controls instead'}</span>`;
+  $('btn-cal-back').classList.remove('hidden');
+}
+async function collectStep(title, sub, stepText, settleMs) {
+  $('cal-title').textContent = title;
+  $('cal-sub').textContent = sub;
+  $('cal-step').textContent = stepText;
+  fillBar('cal-progress', 0);
+  await wait(settleMs); // time to get into position
+  const t0 = performance.now();
+  const bar = setInterval(() => fillBar('cal-progress', (performance.now() - t0) / 1500), 50);
+  const samples = await tracker.collect(1500);
+  clearInterval(bar);
+  fillBar('cal-progress', 1);
+  return samples;
+}
+
+async function runCalibration(next = goHome) {
+  if (!tracker.lm) return show('s-camera');
+  S.retry = () => runCalibration(next);
+  calScreen();
+  const samples = {};
+  for (let i = 0; i < CAL_STEPS.length; i++) {
+    const st = CAL_STEPS[i];
+    samples[st.key] = await collectStep(st.title, st.sub, `Head setup · ${i + 1} of ${CAL_STEPS.length}`, i === 0 ? 1500 : 2200);
+  }
+  const cal = buildCalibration(samples);
+  if (!cal.ok) return calFail(cal.why, !!S.cal);
+  S.cal = cal;
+  // If the GO move was a face exercise, its range is measured already.
+  for (const k of FACE_SIGS) {
+    const r = rangeFromCalibration(cal, k);
+    if (!S.profile.ranges[k] && r) S.profile.ranges[k] = r;
+  }
+  saveProfile();
+  toast('Head setup done', { icon: 'check', kind: 'good' });
+  next();
+}
+
+const SHOW_ME = {
+  jaw: ['Open wide', 'Open your mouth as wide as is comfortable, and hold it.'],
+  pucker: ['Pucker', 'Push your lips forward like a kiss, and hold it.'],
+  smile: ['Big smile', 'Smile as wide as you can, and hold it.'],
+};
+async function captureRanges(keys, next) {
+  S.retry = () => captureRanges(keys, next);
+  calScreen();
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    const samples = await collectStep(`Show us: ${SHOW_ME[k][0]}`, SHOW_ME[k][1], `Measuring your range · ${i + 1} of ${keys.length}`, 2200);
+    const r = rangeFrom(samples, S.cal, k);
+    if (!r) return calFail("We couldn't see that move clearly. Check the light and try a bigger move, or go back and pick another stop.", true);
+    S.profile.ranges[k] = r;
+  }
+  saveProfile();
+  next();
+}
+$('btn-cal-retry').onclick = () => S.retry?.();
+$('btn-cal-back').onclick = () => {
+  if (!S.cal) S.mode = 'touch';
+  goHome();
+};
+
+const needsRanges = (sigs) => (S.mode === 'head' ? [...new Set(sigs)].filter((k) => FACE_SIGS.includes(k) && !S.profile.ranges[k]) : []);
+const verb = () => (S.mode !== 'head' ? 'Slide' : S.cal?.axis === 'roll' ? 'Tilt' : 'Turn');
+
+// ---------- Home: up next, today, and the roadmap of every stop ----------
+const fmtMin = (m) => (m < 10 ? m.toFixed(1).replace(/\.0$/, '') : String(Math.round(m)));
+const fmt = (ms) => `${(ms / 1000).toFixed(2)} s`;
+const stopTrack = (ui, li) => (ui < 0 ? raceTrack('gp') : li === 5 ? raceTrack(UNITS[ui].id) : lessonTrack(ui, li));
+
+function goHome() {
+  if (S.queued) send({ t: 'leave' });
+  S.queued = false;
+  S.local = false;
+  S.phase = 'home';
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  overlay('');
+  clearInterval(S.restTimer);
+  renderHome();
+  show('s-home');
+  const nx = nextNode(S.profile);
+  scene(nx ? stopTrack(nx.ui, nx.li) : raceTrack('gp'), 'preview', 0.64);
+  world?.reset();
+}
+$('home-scroll').addEventListener('scroll', () => {
+  const el = $('home-scroll');
+  $('s-home').classList.toggle('scrolled', el.scrollTop > el.querySelector('.hero-space').offsetHeight - 50);
+}, { passive: true });
+
+function streakText(wv) {
+  const left = Math.max(0, wv.target - wv.count);
+  let t = wv.streak
+    ? `${wv.streak}-week streak. ${wv.thisWeekMet ? 'This week is done.' : `${left} more goal day${left === 1 ? '' : 's'} this week.`}`
+    : `Hit your goal on ${wv.target} days this week to start a streak. Rest days are built in.`;
+  if (wv.frozen) t += ' A missed week was frozen, so your streak kept going.';
+  return t;
+}
+
+// Where each stop sits on a unit's trail: x in % of the width, y in px.
+const TRAIL_X = [22, 42, 70, 78, 58, 30];
+const TRAIL_STEP = 84;
+const TRAIL_TOP = 44;
+const trailX = (ui, li) => (ui % 2 ? 100 - TRAIL_X[li] : TRAIL_X[li]);
+
+function stopInfo(p, ui, li) {
+  const u = UNITS[ui];
+  const st = nodeState(p, ui, li);
+  if (li === 5) {
+    const b = p.bosses[u.id];
+    return { st, boss: true, title: `Boss: ${u.boss.name}`, sub: raceTrack(u.id).name, meta: b?.bestMs ? `Best ${fmt(b.bestMs)}` : 'Race the real car' };
+  }
+  const l = lessonsOf(p, u.id)[li];
+  const meta = isGold(l) ? `Gold · level ${l.level + 1}` : l.plays ? `Level ${l.level + 1} · last ${Math.round((l.lastRate || 0) * 10)}/10` : 'Not played yet';
+  return { st, title: KINDS[li].title, sub: lessonTrack(ui, li).name, meta };
+}
+
+function diamond(st, { boss = false, num = '', icon = null } = {}) {
+  const ic = icon || (st === 'gold' ? 'crown' : st === 'done' ? 'check' : boss ? 'car' : null);
+  const inner = ic ? `<i data-icon="${ic}"></i>` : `<b>${num}</b>`;
+  const cls = ['dia', `s-${st === 'next' ? 'open' : st}`, st === 'next' && 's-next', boss && 's-boss'].filter(Boolean).join(' ');
+  return `<span class="${cls}">${inner}</span>`;
+}
+
+function renderHome() {
+  const p = S.profile;
+  if (!p) return;
+  const day = localDay();
+  $('h-name').textContent = p.name;
+  $('h-avatar').textContent = p.name.charAt(0).toUpperCase();
+  const lv = xpLevel(p.xp);
+  $('h-level').textContent = `Level ${lv.level}`;
+  fillBar('h-level-bar', lv.frac);
+  $('h-xp').textContent = p.xp;
+  const wv = weekView(p, day);
+  $('h-streak').textContent = `${wv.streak} wk`;
+
+  // Up next
+  const nx = nextNode(p);
+  const card = document.querySelector('#s-home .up-next');
+  card.className = `panel up-next ${nx ? COLOR_CLASS[nx.ui] : 'c-violet'}`;
+  if (nx) {
+    const u = UNITS[nx.ui];
+    const t = stopTrack(nx.ui, nx.li);
+    $('h-next-unit').textContent = `Unit ${nx.ui + 1} · ${u.title}`;
+    $('h-next-title').textContent = nx.li === 5 ? `Boss race: ${u.boss.name}` : KINDS[nx.li].title;
+    $('h-next-course').innerHTML = `${iconSvg('map')}<span>${esc(t.name)} · ${nx.li === 5 ? 'a race on the real car' : `${LESSON_GATES} gates, about 2 minutes`}</span>`;
+    $('h-next-what').textContent = nx.li === 5 ? u.boss.how : KINDS[nx.li].what;
+    $('h-next-tag').textContent = p.xp ? 'up next' : 'start here';
+    $('h-hero-note').textContent = t.name.toLowerCase();
+    $('btn-continue').innerHTML = `<span data-icon="play">${nx.li === 5 ? 'See the race' : 'Start'}</span>`;
+  } else {
+    $('h-next-unit').textContent = 'Together';
+    $('h-next-title').textContent = 'Every stop is done!';
+    $('h-next-course').innerHTML = `${iconSvg('trophy')}<span>Replay anything, or race the Grand Prix</span>`;
+    $('h-next-what').textContent = GRAND_PRIX.how;
+    $('h-next-tag').textContent = 'well done';
+    $('h-hero-note').textContent = 'grand prix';
+    $('btn-continue').innerHTML = '<span data-icon="trophy">Race the Grand Prix</span>';
+  }
+  const tv = todayView(p, day);
+  $('h-ring').style.setProperty('--p', tv.frac.toFixed(3));
+  $('h-ring').classList.toggle('done', tv.met);
+  $('h-ring-text').textContent = tv.met ? '✓' : `${Math.round(tv.frac * 100)}%`;
+  $('h-today').textContent = tv.met ? `Daily goal done! ${fmtMin(tv.min)} min today` : `${fmtMin(tv.min)} of ${tv.goalMin} min today`;
+  $('h-days').innerHTML = wv.days.map((d) => `<span class="${[d.met && 'met', d.today && 'today', d.future && 'future'].filter(Boolean).join(' ')}">${d.label}</span>`).join('');
+  $('h-streak-text').textContent = streakText(wv);
+
+  // Roadmap
+  const pp = pathProgress(p);
+  $('h-map-count').textContent = `${pp.done} / ${pp.total} stops${pp.gold ? ` · ${pp.gold} gold` : ''}`;
+  fillBar('h-map-bar', pp.done / pp.total);
+  const line = progressLine(p);
+  $('h-progress').textContent = line;
+  $('h-progress').classList.toggle('hidden', !line);
+
+  const gpCount = p.counts?.gp || 0;
+  $('h-unit-tabs').innerHTML = UNITS.map((u, ui) => {
+    const up = unitProgress(p, ui);
+    return `<button class="utab ${COLOR_CLASS[ui]}" data-jump="${ui}" style="--fill:${(up.done / up.total).toFixed(3)}" aria-label="Unit ${ui + 1}, ${esc(u.title)}, ${up.done} of ${up.total} done"><b>${ui + 1}</b><span>${up.done}/${up.total}</span></button>`;
+  }).join('') + `<button class="utab c-violet" data-jump="gp" style="--fill:${gpCount ? 1 : 0}" aria-label="Grand Prix"><b><i data-icon="trophy"></i></b><span>GP</span></button>`;
+
+  let html = '';
+  UNITS.forEach((u, ui) => {
+    const up = unitProgress(p, ui);
+    const H = TRAIL_TOP * 2 + 5 * TRAIL_STEP;
+    const pts = [0, 1, 2, 3, 4, 5].map((li) => [trailX(ui, li), TRAIL_TOP + li * TRAIL_STEP]);
+    const d = pts.map(([x, y], i) => {
+      if (!i) return `M${x} ${y}`;
+      const [px, py] = pts[i - 1];
+      return `C${px} ${py + TRAIL_STEP / 2} ${x} ${y - TRAIL_STEP / 2} ${x} ${y}`;
+    }).join('');
+    html += `<div class="region ${COLOR_CLASS[ui]}" id="region-${ui}">
+      <div class="region-head"><span class="region-num">${ui + 1}</span><div><p class="eyebrow">Unit ${ui + 1} · ${esc(u.section)}</p><h3 class="title">${esc(u.title)}</h3></div>
+      <div class="ring small" style="--p:${(up.done / up.total).toFixed(3)}"><span>${up.done}/${up.total}</span></div></div>
+      <p class="region-why">${esc(u.move)}. ${esc(u.why)}</p>
+      <div class="trail" style="height:${H}px"><svg viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" vector-effect="non-scaling-stroke"/></svg>`;
+    for (let li = 0; li <= 5; li++) {
+      const info = stopInfo(p, ui, li);
+      const x = trailX(ui, li);
+      const left = x > 50;
+      html += `<button class="stop${left ? ' label-left' : ''}" style="left:${x}%;top:${pts[li][1]}px" data-ui="${ui}" data-li="${li}" aria-label="${esc(info.title)}, ${esc(info.sub)}, ${esc(info.meta)}">`
+        + `${diamond(info.st, { boss: info.boss, num: li + 1 })}<span class="stop-label"><b>${esc(info.title)}</b><small>${esc(info.sub)}</small><small class="meta">${esc(info.meta)}</small></span></button>`;
+      if (info.st === 'next') {
+        html += `<span class="here${left ? ' to-right' : ''}" style="left:${x}%;top:${pts[li][1]}px" aria-hidden="true">${p.xp ? 'next!' : 'start here!'}</span>`;
+      }
+    }
+    html += '</div></div>';
+  });
+  html += `<div class="region c-violet" id="region-gp">
+    <div class="region-head"><span class="region-num"><i data-icon="trophy"></i></span><div><p class="eyebrow">Together · head and face</p><h3 class="title">${GRAND_PRIX.name}</h3></div></div>
+    <p class="region-why">${esc(GRAND_PRIX.how)} Open any time.</p>
+    <div class="trail short"><button class="stop" style="left:28%;top:46px" data-gp="1" aria-label="Grand Prix">${diamond(gpCount ? 'done' : 'open', { boss: true, icon: 'trophy' })}<span class="stop-label"><b>Grand Prix</b><small>${esc(raceTrack('gp').name)} · leaderboard</small><small class="meta">${gpCount ? `Raced ${gpCount} time${gpCount === 1 ? '' : 's'}${p.bosses.gp?.bestMs ? ` · best ${fmt(p.bosses.gp.bestMs)}` : ''}` : 'Not raced yet'}</small></span></button></div>
+  </div>`;
+  $('map').innerHTML = html;
+  mountIcons($('s-home'));
+}
+
+$('map').onclick = (e) => {
+  const b = e.target.closest('.stop');
+  if (!b) return;
+  if (b.dataset.gp) openStop(-1, -1);
+  else openStop(Number(b.dataset.ui), Number(b.dataset.li));
+};
+$('h-unit-tabs').onclick = (e) => {
+  const b = e.target.closest('[data-jump]');
+  if (b) $(`region-${b.dataset.jump}`)?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+};
+$('btn-continue').onclick = () => {
+  const nx = nextNode(S.profile);
+  if (!nx) return openStop(-1, -1);
+  if (nx.li === 5) return openStop(nx.ui, 5);
+  startLesson(nx.ui, nx.li);
+};
+$('btn-me').onclick = () => openMenu('progress');
+$('btn-menu').onclick = () => openMenu('progress');
+
+// ---------- A stop: a lesson, a boss race or the Grand Prix ----------
+function courseSvg(t) {
+  const { d, map } = trackSvgPath(t, 120, 80, 9);
+  const at = (dist) => map(t.pointAt(dist).x, t.pointAt(dist).y).map((v) => v.toFixed(1));
+  const marks = t.gates.length
+    ? t.gates.map((g) => {
+      const [x, y] = at(g);
+      return `<circle class="gate-dot" cx="${x}" cy="${y}" r="2.8"/>`;
+    }).join('')
+    : t.stars.map((s) => {
+      const [x, y] = map(s.x, s.y).map((v) => v.toFixed(1));
+      return `<circle class="star-dot" cx="${x}" cy="${y}" r="2.2"/>`;
+    }).join('');
+  const ramps = t.features.filter((f) => f.type === 'ramp').map((f) => {
+    const [x, y] = at(f.at + f.len / 2);
+    return `<rect class="ramp-dot" x="${(x - 2.6).toFixed(1)}" y="${(y - 2.6).toFixed(1)}" width="5.2" height="5.2" rx="1" transform="rotate(45 ${x} ${y})"/>`;
+  }).join('');
+  const [sx, sy] = at(t.startAt);
+  const [fx, fy] = at(t.finishAt);
+  return `<path class="road" d="${d}"/><path class="line" d="${d}"/>${ramps}${marks}`
+    + `<circle class="start-dot" cx="${sx}" cy="${sy}" r="3.6"/><rect class="finish-dot" x="${(fx - 3.6).toFixed(1)}" y="${(fy - 3.6).toFixed(1)}" width="7.2" height="7.2" rx="1.2"/>`;
+}
+
+function openStop(ui, li) {
+  S.stop = { ui, li };
+  S.phase = 'home';
+  const p = S.profile;
+  const t = stopTrack(ui, li);
+  document.querySelector('#s-stop .stop-sheet').className = `panel sheet stop-sheet ${ui < 0 ? 'c-violet' : COLOR_CLASS[ui]}`;
+  const ramps = t.features.filter((f) => f.type === 'ramp').length;
+  const jumps = ramps ? `${ramps} jump${ramps === 1 ? '' : 's'}` : 'No jumps';
+  let facts;
+  let note = '';
+  if (ui < 0) {
+    $('st-unit').textContent = 'Together · head and face';
+    $('st-title').textContent = GRAND_PRIX.name;
+    $('st-what').textContent = `${GRAND_PRIX.how} Times go on the big screen's leaderboard.`;
+    facts = [['Your races', String(p.counts?.gp || 0)], ['Best time', p.bosses.gp?.bestMs ? fmt(p.bosses.gp.bestMs) : 'Not yet'], ['Reward', `+${XP.gp} XP`]];
+  } else {
+    const u = UNITS[ui];
+    $('st-unit').textContent = `Unit ${ui + 1} · ${u.title}`;
+    if (li === 5) {
+      const b = p.bosses[u.id];
+      $('st-title').textContent = `Boss race: ${u.boss.name}`;
+      $('st-what').textContent = u.boss.how;
+      facts = [['Best time', b?.bestMs ? fmt(b.bestMs) : 'Not yet'], ['Cleared', b?.cleared ? 'Yes' : 'Not yet'], ['Reward', `+${XP.boss} XP`]];
+      if (!lessonsOf(p, u.id).every((l) => l.done)) note = `The five ${u.title} lessons practise this move first, but you can race now.`;
+    } else {
+      const k = KINDS[li];
+      const l = lessonsOf(p, u.id)[li];
+      $('st-title').textContent = k.title;
+      $('st-what').textContent = `${k.what} Do it at each gate to open it. A miss still opens the gate, so you always reach the finish.`;
+      facts = [
+        ['Level', `${l.level + 1}: ${difficultyText(u.id, k.key, l.level)}`],
+        ['Last score', l.lastRate == null ? 'Not played' : `${Math.round(l.lastRate * 10)}/10`],
+        ['Played', l.plays ? `${l.plays} time${l.plays === 1 ? '' : 's'}` : 'Not yet'],
+        ['Gold', isGold(l) ? 'Yes!' : `${l.goodDays.length} of 2 good days`],
+      ];
+      const prev = lessonsOf(p, u.id)[li - 1];
+      if (prev && !prev.done && !l.done) note = `Suggested first: ${KINDS[li - 1].title}. You can play this one now anyway.`;
+    }
+  }
+  $('st-course').innerHTML = `${iconSvg('map')}<span>${esc(t.name)}</span>`;
+  $('st-svg').innerHTML = courseSvg(t);
+  $('st-course-facts').innerHTML = (li >= 0 && li < 5
+    ? [['gate', `${LESSON_GATES} gates`, 'one rep at each'], ['flag', 'Ends at the finish', `${jumps.toLowerCase()} on the way`], ['clock', 'About 2 minutes', 'the drive is your rest']]
+    : [['star', `${t.stars.length} stars`, `each takes ${STAR_BONUS_MS / 1000} s off`], ['up', jumps, 'with boost pads'], ['car', 'Real RC car', 'or play on this phone']]
+  ).map(([ic, b, s]) => `<div>${iconSvg(ic)}<span><b>${esc(b)}</b><small>${esc(s)}</small></span></div>`).join('');
+  $('st-facts').innerHTML = facts.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
+  $('st-note').textContent = note;
+  $('st-note').classList.toggle('hidden', !note);
+  renderStopActions();
+  show('s-stop');
+  scene(t, 'preview', 0.6);
+  world?.reset();
+  $('s-stop').querySelector('.sheet').scrollTop = 0;
+}
+
+function renderCarStatus() {
+  const el = $('st-car');
+  if (!el) return;
+  const line = S.lineBusy || S.lineLength ? ` · ${S.lineLength} waiting` : ' · track free';
+  el.innerHTML = `<span class="lamp${S.carOnline ? ' on' : ''}"></span>${S.carOnline ? `Real car connected${line}` : 'Real car offline. You can still race on this phone.'}`;
+}
+function renderStopActions() {
+  const { ui, li } = S.stop;
+  if (ui >= 0 && li < 5) {
+    $('st-actions').innerHTML = '<button class="btn unit big" id="btn-st-start"><span data-icon="play">Start lesson</span></button>';
+  } else {
+    const real = (c) => `<button class="btn ${c}" id="btn-st-real"><span data-icon="car">Drive the real car</span></button>`;
+    const phone = (c) => `<button class="btn ${c}" id="btn-st-phone"><span data-icon="phone">Play on this phone</span></button>`;
+    $('st-actions').innerHTML = `<p class="car-status" id="st-car"></p>${S.carOnline ? real('unit big') + phone('quiet') : phone('unit big') + real('quiet')}`;
+    renderCarStatus();
+  }
+  mountIcons($('st-actions'));
+}
+$('st-actions').onclick = (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const { ui, li } = S.stop;
+  const level = ui < 0 ? 'gp' : UNITS[ui].id;
+  if (b.id === 'btn-st-start') startLesson(ui, li);
+  if (b.id === 'btn-st-real') startRace(level, { local: false });
+  if (b.id === 'btn-st-phone') startRace(level, { local: true });
+};
+$('btn-stop-close').onclick = goHome;
+
+// ---------- Lessons: each lesson is its own course that ends at the finish line ----------
+function startLesson(ui, li) {
+  if (S.mode === 'head' && !S.cal) return runCalibration(() => startLesson(ui, li));
+  const unitSigs = UNITS[ui].moves.map((m) => m[0]);
+  const reviewSigs = li === 4 && ui > 0 ? UNITS[ui - 1].moves.map((m) => m[0]) : [];
+  const need = needsRanges([...unitSigs, ...reviewSigs]);
+  if (need.length) return captureRanges(need, () => startLesson(ui, li));
+
+  const lesson = buildLesson(S.profile, ui, li, { verb: verb() });
+  const run = new LessonRun(lesson, { axis: S.cal?.axis || 'yaw' });
+  const track = lessonTrack(ui, li);
+  const course = new LessonCourse(track, run);
+  S.lesson = {
+    ui, li, lesson, run, track, course,
+    activeMs: 0,
+    meterOff: false,
+    lastCue: '',
+    lastGate: -1,
+    wasGold: isGold(lessonsOf(S.profile, UNITS[ui].id)[li]),
+    fatigueShown: false,
+    finishing: false,
+  };
+  S.phase = 'lesson';
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  scene(track, 'chase', 0);
+  world?.reset();
+  world?.setCar(course.car);
+  document.querySelector('#s-lesson .course-bar').className = `course-bar panel slim ${COLOR_CLASS[ui]}`;
+  $('l-course').textContent = `${track.name} · ${KINDS[li].title}`;
+  $('l-track').innerHTML = '<i class="cb-fill" id="l-fill"></i>'
+    + track.gates.map((d, i) => `<span class="cb-gate" data-g="${i}" style="left:${((d / track.finishAt) * 100).toFixed(2)}%"></span>`).join('')
+    + '<span class="cb-flag"></span><span class="cb-car" id="l-car"></span>';
+  mountIcons($('l-track'));
+  $('l-fatigue').classList.add('hidden');
+  $('l-cue').textContent = '';
+  setMeterButton();
+  show('s-lesson');
+}
+
+function setMeterButton() {
+  const off = !!S.lesson?.meterOff;
+  $('btn-meter').innerHTML = `<span data-icon="eye">${off ? 'Show meter' : 'Hide meter'}</span>`;
+  $('btn-meter').setAttribute('aria-pressed', String(off));
+  mountIcons($('btn-meter'));
+}
+$('btn-meter').onclick = () => {
+  if (!S.lesson) return;
+  S.lesson.meterOff = !S.lesson.meterOff;
+  setMeterButton();
+};
+$('btn-tired').onclick = () => finishLesson(true);
+$('btn-l-finish').onclick = () => finishLesson(true);
+$('btn-l-quit').onclick = () => finishLesson(true);
+
+// ?autopilot: a stand-in player that does every rep (for demos and testing without a face).
+const bot = { v: 0 };
+function botSignals(run, dt) {
+  const w = run.want();
+  bot.v += (w.value - bot.v) * Math.min(1, dt * 5);
+  const s = { side: 0, still: 0, pitch: 0, jaw: 0, pucker: 0, smile: 0, raw: { side: 0, jaw: 0, pucker: 0, smile: 0 }, axis: 'yaw', face: true };
+  if (w.sig === 'side' || w.sig === 'still') {
+    s.side = bot.v * (w.dir || 1);
+    s.still = Math.abs(s.side);
+    s.raw.side = s.side * 0.3;
+  } else {
+    s[w.sig] = bot.v;
+    s.raw[w.sig] = bot.v * 0.4;
+  }
+  return s;
+}
+
+function lessonFrame(dt, sig) {
+  const L = S.lesson;
+  const { view, ev, gateEvent } = L.course.update(AUTOPILOT ? botSignals(L.run, dt) : sig, dt);
+  if (!view.lost && L.course.mode !== 'done') L.activeMs += dt * 1000;
+  if (gateEvent) {
+    world?.setGate(gateEvent.i, gateEvent.ok ? 'good' : 'miss');
+    if (gateEvent.ok) {
+      ev.boost = true;
+      if (navigator.vibrate) navigator.vibrate(30);
+    }
+  }
+  const car = L.course.car;
+  world?.fx(ev);
+  world?.setCar({ x: car.x, y: car.y, z: car.z, h: car.h, v: car.v, vz: car.vz, steer: car.steer, air: car.air, boost: L.course.burst > 0 ? 1 : 0 });
+  renderLesson(view);
+  if (view.done && !L.finishing) {
+    L.finishing = true;
+    overlay('Finish!');
+    S.timers.push(setTimeout(() => finishLesson(false), 1300));
+  }
+}
+
+const HOLD_LABEL = { reach: 'Hold', aim: 'Hold', hold: 'Hold', quick: 'Time', return: 'Back' };
+function renderLesson(v) {
+  const L = S.lesson;
+  if (v.cue !== L.lastCue) {
+    const el = $('l-cue');
+    el.textContent = v.cue;
+    const last = v.results[v.results.length - 1];
+    el.classList.remove('pop', 'good');
+    if (v.phase === 'result' && last?.ok && v.mode === 'drive') el.classList.add('good');
+    void el.offsetWidth;
+    el.classList.add('pop');
+    L.lastCue = v.cue;
+  }
+  if ($('l-sub').textContent !== v.sub) $('l-sub').textContent = v.sub;
+  // Course bar: where the car is, and each gate's result.
+  const pct = `${(v.courseProgress * 100).toFixed(1)}%`;
+  $('l-fill').style.width = pct;
+  $('l-car').style.left = pct;
+  const key = v.gate * 2 + (v.mode === 'gate' ? 1 : 0);
+  if (L.lastGate !== key) {
+    L.lastGate = key;
+    v.gates.forEach((g, i) => {
+      const el = $('l-track').querySelector(`[data-g="${i}"]`);
+      if (el) el.className = `cb-gate${g.state !== 'closed' ? ` ${g.state}` : ''}${i === v.gate && !v.done ? ' now' : ''}`;
+    });
+    $('l-count').textContent = v.gate < v.gates.length ? `Gate ${v.gate + 1} / ${v.gates.length}` : 'Finish';
+  }
+  const g = v.gauge;
+  const hide = g.hideDot || L.meterOff;
+  const pad = g.type === 'pad';
+  $('l-gauge').classList.toggle('hidden', pad);
+  $('l-pad').classList.toggle('hidden', !pad);
+  if (pad) {
+    const pos = (u) => `${50 + (clamp(u, -1.25, 1.25) / 1.25) * 50}%`;
+    const dot = $('l-pdot');
+    dot.style.left = pos(g.x);
+    dot.style.top = pos(g.y);
+    dot.classList.toggle('ghost', hide);
+    const z = g.band?.zone;
+    const zone = $('l-zone');
+    zone.classList.toggle('hidden', !z);
+    zone.classList.toggle('rest', g.band?.kind === 'rest');
+    if (z) {
+      const size = Math.min(100, (z / 1.25) * 100);
+      Object.assign(zone.style, { width: `${size}%`, height: `${size}%`, left: `${50 - size / 2}%`, top: `${50 - size / 2}%` });
+    }
+  } else {
+    const bi = g.type === 'bi';
+    $('l-gauge').classList.toggle('bi', bi);
+    const pos = (u) => (bi ? 50 + (clamp(u, -1.25, 1.25) / 1.25) * 50 : (clamp(u, 0, 1.25) / 1.25) * 100);
+    const at = (pct) => `calc(14px + (100% - 28px) * ${(pct / 100).toFixed(4)})`; // keep the dot inside the rounded ends
+    $('l-dot').style.left = at(pos(g.value));
+    $('l-dot').classList.toggle('ghost', hide);
+    const band = $('l-band');
+    const r = g.band?.range;
+    band.classList.toggle('hidden', !r);
+    if (r) {
+      const a = pos(Math.min(r[0], r[1]));
+      const b = pos(Math.max(r[0], r[1]));
+      const lo = a <= 0.5 ? 0 : a; // bands that start at an end fill to the edge
+      const hi = b >= 99.5 ? 100 : b;
+      band.style.left = lo === 0 ? '4px' : at(lo);
+      band.style.width = `calc(${hi === 100 ? '100% - 4px' : at(hi)} - ${lo === 0 ? '4px' : at(lo)})`;
+      band.classList.toggle('rest', g.band.kind === 'rest');
+    }
+  }
+  $('l-hold-label').textContent = v.mode === 'gate' ? HOLD_LABEL[L.run.rep.kind] || 'Hold' : 'Drive';
+  fillBar('l-hold', v.mode === 'gate' ? v.progress : v.courseProgress);
+  $('l-hold').parentElement.classList.toggle('drive', v.mode !== 'gate');
+  if (v.fatigue && !L.fatigueShown) {
+    L.fatigueShown = true;
+    $('l-fatigue').classList.remove('hidden');
+  }
+  $('cam-slot-lesson').classList.toggle('lost', !!v.lost);
+}
+
+function finishLesson(tired) {
+  const L = S.lesson;
+  if (!L || S.phase !== 'lesson') return;
+  S.phase = 'lessondone';
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  overlay('');
+  const sum = { ...L.run.summary(), ms: Math.round(L.activeMs), tired };
+  if (!sum.total) {
+    // Stopped before the first gate: keep the practice time, nothing to score.
+    addPractice(S.profile, localDay(), { ms: sum.ms });
+    saveProfile();
+    return goHome();
+  }
+  const unit = UNITS[L.ui];
+  const out = withAwards(() => recordLesson(S.profile, L.ui, L.li, sum, localDay()));
+  saveProfile();
+  send({
+    t: 'practice', name: S.profile.name, unit: unit.id, lesson: L.li, good: sum.good, total: sum.total,
+    xp: out.xp, ms: sum.ms, reactMs: sum.reactMs, fatigue: sum.fatigue, tired,
+  });
+  showDone(sum, out, tired);
+}
+
+function showDone(sum, out, tired) {
+  const L = S.lesson;
+  $('s-done').querySelector('.sheet').className = `panel sheet ${COLOR_CLASS[L.ui]}`;
+  $('d-unit').textContent = `Unit ${L.ui + 1} · ${UNITS[L.ui].title} · ${L.track.name}`;
+  $('d-title').textContent = tired ? 'Good call to rest' : sum.rate >= 0.9 ? 'Brilliant!' : sum.rate >= 0.6 ? 'Course complete' : 'You made it';
+  $('d-score').textContent = `${sum.good}/${sum.total}`;
+  $('d-xp').textContent = `+${out.xp}`;
+  $('d-gates').innerHTML = Array.from({ length: LESSON_GATES }, (_, i) => {
+    const r = L.run.results[i];
+    return `<i class="${r ? (r.ok ? 'good' : 'miss') : ''}" title="Gate ${i + 1}: ${r ? (r.ok ? 'good rep' : 'missed') : 'not reached'}"></i>`;
+  }).join('');
+  let banner = '';
+  let icon = 'star';
+  if (out.goalJustMet) {
+    banner = 'Daily goal done!';
+    icon = 'flame';
+  } else if (out.gold && !L.wasGold) {
+    banner = 'Gold! You did this well on two different days.';
+    icon = 'crown';
+  } else if (out.change === 'up') {
+    banner = 'Level up for this lesson.';
+    icon = 'up';
+  }
+  $('d-banner').innerHTML = banner ? `${iconSvg(icon)}<span>${esc(banner)}</span>` : '';
+  $('d-banner').classList.toggle('hidden', !banner);
+  $('d-change').textContent = out.text;
+  $('d-change').classList.toggle('hidden', !out.text);
+  const fat = sum.fatigue
+    ? 'Your last reps looked tired: slower or smaller moves. A longer rest, or stopping for today, is a good idea.'
+    : tired ? 'Stopping when you are tired is part of training. Your reps still count.' : '';
+  $('d-fatigue').textContent = fat;
+  $('d-fatigue').classList.toggle('hidden', !fat);
+  const line = progressLine(S.profile);
+  $('d-progress').textContent = line;
+  $('d-progress').classList.toggle('hidden', !line);
+  const tv = todayView(S.profile, localDay());
+  $('d-today').textContent = tv.met ? `Goal done! ${fmtMin(tv.min)} min` : `${fmtMin(tv.min)} of ${tv.goalMin} min`;
+  fillBar('d-goal', tv.frac);
+  $('btn-next').innerHTML = `<span data-icon="play">${L.li < 4 ? `Next: ${KINDS[L.li + 1].title}` : 'Next: the boss race'}</span>`;
+  mountIcons($('btn-next'));
+  startRest();
+  show('s-done');
+  scene(L.track, 'showcase', 0.6);
+  $('s-done').querySelector('.sheet').scrollTop = 0;
+}
+
+function startRest() {
+  clearInterval(S.restTimer);
+  const t0 = Date.now();
+  const tick = () => {
+    const el = Math.floor((Date.now() - t0) / 1000);
+    const left = Math.max(0, 30 - el);
+    $('d-rest-title').textContent = left ? `Rest ${left} s` : 'Rested. Ready when you are.';
+    $('d-rest-sub').textContent = left ? (Math.floor(el / 4) % 2 ? 'Breathe out slowly.' : 'Breathe in slowly.') : 'Take more time if you need it.';
+    if (!left) clearInterval(S.restTimer);
+  };
+  tick();
+  S.restTimer = setInterval(tick, 250);
+}
+$('btn-next').onclick = () => {
+  clearInterval(S.restTimer);
+  const { ui, li } = S.lesson;
+  if (li < 4) startLesson(ui, li + 1);
+  else openStop(ui, 5);
+};
+$('btn-to-path').onclick = goHome;
+
+// ---------- Races: boss races and the Grand Prix ----------
+function startRace(level, { local = false } = {}) {
+  if (S.mode === 'head' && !S.cal) return runCalibration(() => startRace(level, { local }));
+  const need = needsRanges(level === 'u3' ? ['jaw'] : level === 'u4' ? ['pucker'] : []);
+  if (need.length) return captureRanges(need, () => startRace(level, { local }));
+  S.level = level;
+  S.local = local;
+  S.track = raceTrack(level);
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  if (!local) return goWait();
+  if (S.queued) send({ t: 'leave' });
+  S.queued = false;
+  startCountdownView();
+  [3, 2, 1].forEach((n, i) => S.timers.push(setTimeout(() => overlay(String(n)), 300 + i * 1000)));
+  S.timers.push(setTimeout(goNow, 3300));
+}
+function goNow() {
+  if (S.phase !== 'countdown') return;
+  S.phase = 'racing';
+  S.raceStart = performance.now();
+  overlay('GO');
+  S.timers.push(setTimeout(() => S.phase === 'racing' && overlay(''), 700));
+}
+
+// Each boss race uses one exercise. The car steers itself unless steering is the exercise.
+function bossControl(level, it, sig, car) {
+  const on = sig.face;
+  switch (level) {
+    case 'u1': return { steer: autoSteer(car), go: on ? clamp((0.5 - sig.still) / 0.3, 0, 1) : 0 };
+    case 'u2': return { steer: it.steer, go: on ? 0.6 : 0 };
+    case 'u3': return { steer: autoSteer(car), go: on ? clamp((sig.jaw - 0.15) / 0.55, 0, 1) : 0 };
+    case 'u4': {
+      if (on && sig.pucker > 0.55) {
+        if (!S.puckerUp && performance.now() - S.lastBoost > 1200) {
+          car.boost = 1.0;
+          S.lastBoost = performance.now();
+          S.stats.puckers++;
+          world?.fx({ boost: true });
+        }
+        S.puckerUp = true;
+      } else if (sig.pucker < 0.3) S.puckerUp = false;
+      return { steer: autoSteer(car), go: on ? 0.5 : 0 };
+    }
+  }
+  return it;
+}
+// What the meters show for each race.
+function bossPreview(level, it, sig) {
+  if (level === 'gp') return it;
+  if (!sig.face) return { steer: 0, go: 0 };
+  return {
+    u1: { steer: 0, go: clamp((0.5 - sig.still) / 0.3, 0, 1) },
+    u2: { steer: it.steer, go: 0.6 },
+    u3: { steer: 0, go: clamp((sig.jaw - 0.15) / 0.55, 0, 1) },
+    u4: { steer: 0, go: sig.pucker },
+  }[level];
+}
+const GO_LABEL = { u1: 'Steady', u2: 'Auto', u3: 'Mouth', u4: 'Pucker' };
+const raceTitle = (level) => (level === 'gp' ? GRAND_PRIX.name : `Boss race · ${levelName(level)}`);
+
+function howTo() {
+  if (S.level !== 'gp') {
+    const u = UNITS[unitIndex(S.level)];
+    return esc(u.boss.how) + (S.mode === 'touch' ? ' On touch: slide to steer, drag up for face moves.' : '');
+  }
+  if (S.mode === 'touch') return 'Hold a finger on the screen to go. Slide it left or right to steer.';
+  return `To steer, <b>${esc(S.cal.steerLabel)}</b>. To go, <b>${esc(S.cal.goLabel)}</b>. Practise here while you wait.`;
+}
+function joinQueue() {
+  send({ t: 'join', name: S.name, assist: S.assist, level: S.level });
+}
+function goWait() {
+  S.phase = 'waiting';
+  S.queued = true;
+  $('wait-level').textContent = raceTitle(S.level);
+  $('wait-howto').innerHTML = howTo();
+  $('w-go-label').textContent = S.level !== 'gp' ? GO_LABEL[S.level] : S.mode === 'head' ? S.cal.goLabel : 'hold finger';
+  const head = S.mode === 'head';
+  $('cam-slot-wait').classList.toggle('hidden', !head);
+  $('btn-recal').classList.toggle('hidden', !head);
+  $('sens-choices').classList.toggle('hidden', !head || !(S.level === 'gp' || S.level === 'u2'));
+  $('wait-pos').textContent = 'Joining the line…';
+  show('s-wait');
+  scene(S.track, 'showcase', 0.62);
+  world?.reset();
+  joinQueue();
+}
+$('btn-recal').onclick = () => runCalibration(goWait); // keeps your place in line
+$('btn-leave').onclick = () => {
+  send({ t: 'leave' });
+  S.queued = false;
+  goHome();
+};
+$('btn-local').onclick = () => {
+  send({ t: 'leave' });
+  S.queued = false;
+  startRace(S.level, { local: true });
+};
+
+$('btn-start').onclick = () => {
+  if (S.phase === 'turn') {
+    send({ t: 'start' });
+    startCountdownView();
+  }
+};
+
+function startCountdownView() {
+  S.phase = 'countdown';
+  S.car = newCar(S.track);
+  S.stats = { headMoves: 0, goMoves: 0, goHoldMs: 0, wallHits: 0, jumps: 0, puckers: 0, steerUp: false, goUp: false };
+  S.puckerUp = false;
+  S.lastBoost = 0;
+  scene(S.track, 'chase', 0);
+  world?.reset();
+  world?.setCar(S.car);
+  overlay(S.local ? '' : '3');
+  show('s-race');
+  $('hud-time').textContent = '0.0';
+  $('hud-stars').textContent = `0/${S.track.stars.length}`;
+  $('hud-name').textContent = `${S.level === 'gp' ? S.track.name : levelName(S.level)}${S.local ? ' · phone' : ''}`;
+  $('r-go-label').textContent = S.level === 'gp' ? 'Go' : GO_LABEL[S.level];
+  $('r-steer-wrap').classList.toggle('hidden', !(S.level === 'gp' || S.level === 'u2')); // the other races steer themselves
+  drawMinimapBase();
+}
+
+// ---------- Input ----------
+for (const pad of [$('touch-pad'), $('touch-pad-lesson')]) {
+  pad.addEventListener('pointerdown', (e) => {
+    S.touch = { active: true, x0: e.clientX, x: e.clientX, y0: e.clientY, y: e.clientY };
+    pad.setPointerCapture(e.pointerId);
+  });
+  pad.addEventListener('pointermove', (e) => {
+    if (!S.touch.active) return;
+    S.touch.x = e.clientX;
+    S.touch.y = e.clientY;
+  });
+  const end = () => (S.touch.active = false);
+  pad.addEventListener('pointerup', end);
+  pad.addEventListener('pointercancel', end);
+}
+addEventListener('keydown', (e) => {
+  if (e.target.matches?.('input')) return;
+  S.keys.add(e.key);
+});
+addEventListener('keyup', (e) => S.keys.delete(e.key));
+addEventListener('blur', () => S.keys.clear());
+
+const SIG_KEYS = ['side', 'still', 'pitch', 'jaw', 'pucker', 'smile'];
+// Per-exercise signals for lessons and boss races, smoothed so camera jitter doesn't flicker targets.
+function readSignals() {
+  let s;
+  if (S.mode === 'head') {
+    s = S.cal && tracker.m && tracker.faceVisible
+      ? toSignals(S.cal, tracker.m, S.profile?.ranges)
+      : { side: 0, still: 0, pitch: 0, jaw: 0, pucker: 0, smile: 0, raw: { side: 0, jaw: 0, pucker: 0, smile: 0 }, axis: S.cal?.axis || 'yaw', face: false };
+  } else {
+    // Touch: slide sideways = head left/right, drag up = face moves.
+    const t = S.touch;
+    const side = t.active ? clamp((t.x - t.x0) / 110, -1.3, 1.3) : 0;
+    const amt = t.active ? clamp((t.y0 - t.y) / 150, 0, 1.3) : 0;
+    s = { side, still: Math.abs(side), pitch: 0, jaw: amt, pucker: amt, smile: amt, raw: { side: side * 0.3, jaw: amt * 0.5, pucker: amt * 0.5, smile: amt * 0.5 }, axis: 'yaw', face: true };
+  }
+  const k = S.keys; // laptop testing: arrows / WASD
+  if (k.size) {
+    const side = k.has('ArrowLeft') || k.has('a') ? -1 : k.has('ArrowRight') || k.has('d') ? 1 : 0;
+    const amt = k.has('ArrowUp') || k.has('w') || k.has(' ') ? 1 : 0;
+    Object.assign(s, { side, still: Math.abs(side), jaw: amt, pucker: amt, smile: amt, face: true });
+    s.raw = { side: side * 0.3, jaw: amt * 0.5, pucker: amt * 0.5, smile: amt * 0.5 };
+  }
+  const prev = S.sig;
+  if (prev?.face && s.face) {
+    for (const key of SIG_KEYS) s[key] = prev[key] + (s[key] - prev[key]) * 0.4;
+  }
+  S.sig = s;
+  return s;
+}
+
+function readIntent() {
+  let steer = 0;
+  let go = 0;
+  let lost = false;
+  if (S.mode === 'head') {
+    if (S.cal && tracker.m && tracker.faceVisible) ({ steer, go } = toIntent(S.cal, tracker.m, S.sens));
+    else lost = true; // can't see the face: no gas
+  } else if (S.touch.active) {
+    go = 1;
+    steer = clamp((S.touch.x - S.touch.x0) / 110, -1, 1);
+  }
+  // ?autopilot drives races by itself: for testing the real car without head setup.
+  if (AUTOPILOT && S.car && (S.phase === 'racing' || S.phase === 'countdown')) {
+    steer = autoSteer(S.car);
+    go = 0.85;
+    lost = false;
+  }
+  const k = S.keys;
+  if (k.size) {
+    if (k.has('ArrowLeft') || k.has('a')) steer = -1;
+    if (k.has('ArrowRight') || k.has('d')) steer = 1;
+    if (k.has('ArrowUp') || k.has('w') || k.has(' ')) go = 1;
+    lost = false;
+  }
+  // Steering is smoothed more than GO so small head wobbles don't jerk the car.
+  S.intent.steer += (steer - S.intent.steer) * 0.25;
+  S.intent.go += (go - S.intent.go) * 0.4;
+  if (lost && S.mode === 'head') S.intent.go = 0;
+  S.intent.lost = lost;
+  return S.intent;
+}
+
+function setMeters(steerEl, goEl, it) {
+  $(steerEl).style.left = `${50 + clamp(it.steer, -1, 1) * 44}%`;
+  fillBar(goEl, it.go);
+}
+
+// ---------- Minimap of the current race course ----------
+const mini = $('minimap');
+const mctx = mini.getContext('2d');
+let miniMap = null;
+let miniBase = null;
+function drawMinimapBase() {
+  const t = S.track;
+  miniMap = trackSvgPath(t, mini.width, mini.height, 16).map;
+  miniBase = document.createElement('canvas');
+  miniBase.width = mini.width;
+  miniBase.height = mini.height;
+  const g = miniBase.getContext('2d');
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  const path = () => {
+    g.beginPath();
+    t.pts.forEach(([x, y], i) => {
+      const [px, py] = miniMap(x, y);
+      if (i) g.lineTo(px, py);
+      else g.moveTo(px, py);
+    });
+    g.closePath();
+  };
+  g.strokeStyle = '#cfc5b3';
+  g.lineWidth = 12;
+  path();
+  g.stroke();
+  g.strokeStyle = '#fbf6ec';
+  g.lineWidth = 7;
+  path();
+  g.stroke();
+  const f = t.pointAt(t.finishAt);
+  const [fx, fy] = miniMap(f.x, f.y);
+  g.fillStyle = '#22303a';
+  g.fillRect(fx - 5, fy - 5, 10, 10);
+}
+function drawMinimap(car) {
+  if (!miniBase) return;
+  mctx.clearRect(0, 0, mini.width, mini.height);
+  mctx.drawImage(miniBase, 0, 0);
+  S.track.stars.forEach((s, i) => {
+    if (car.stars.includes(i)) return;
+    const [x, y] = miniMap(s.x, s.y);
+    mctx.fillStyle = '#f2a922';
+    mctx.beginPath();
+    mctx.arc(x, y, 3.4, 0, Math.PI * 2);
+    mctx.fill();
+  });
+  const [cx, cy] = miniMap(car.x, car.y);
+  mctx.fillStyle = '#fff';
+  mctx.beginPath();
+  mctx.arc(cx, cy, 8, 0, Math.PI * 2);
+  mctx.fill();
+  mctx.fillStyle = '#f26a4b';
+  mctx.beginPath();
+  mctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+  mctx.fill();
+}
+
+// ---------- Race ----------
+function countStats(it, dt, ev) {
+  const st = S.stats;
+  const a = Math.abs(it.steer);
+  if (!st.steerUp && a > 0.5) {
+    st.steerUp = true;
+    st.headMoves++;
+  }
+  if (st.steerUp && a < 0.2) st.steerUp = false;
+  if (!st.goUp && it.go > 0.5) {
+    st.goUp = true;
+    st.goMoves++;
+  }
+  if (st.goUp && it.go < 0.2) st.goUp = false;
+  if (it.go > 0.3) st.goHoldMs += dt * 1000;
+  if (ev.launch) st.jumps++;
+  if (ev.newHit) {
+    st.wallHits++;
+    if (navigator.vibrate) navigator.vibrate(40);
+  }
+  if (ev.land && navigator.vibrate) navigator.vibrate(60);
+}
+
+function raceStats() {
+  const st = S.stats;
+  const stats = { headMoves: st.headMoves, goMoves: st.goMoves, goHoldMs: Math.round(st.goHoldMs), wallHits: st.wallHits, jumps: st.jumps };
+  if (S.level === 'u4') Object.assign(stats, { goMoves: st.puckers, goHoldMs: 0 });
+  return stats;
+}
+
+function raceFrame(dt, it, sig) {
+  const car = S.car;
+  const face = S.mode === 'head' ? sig.face : true;
+  if (S.phase === 'racing') {
+    const ctl = S.level === 'gp' || AUTOPILOT ? it : bossControl(S.level, it, sig, car);
+    const ev = step(car, ctl.steer, ctl.go, dt, S.assist);
+    countStats(ctl, dt, ev);
+    world?.fx(ev);
+    world?.setStars(car.stars);
+    const elapsed = performance.now() - S.raceStart;
+    $('hud-time').textContent = (elapsed / 1000).toFixed(1);
+    $('hud-stars').textContent = `${car.stars.length}/${S.track.stars.length}`;
+    if (!S.local && performance.now() - S.lastSend > 50) {
+      S.lastSend = performance.now();
+      send({
+        t: 'state', x: car.x, y: car.y, z: car.z, h: car.h, v: car.v,
+        cs: car.steerOut, ct: car.throttleOut, stars: car.stars, air: car.air, boost: car.boost > 0,
+      });
+    }
+    if (car.finished) {
+      S.phase = 'done';
+      const rawMs = Math.round(elapsed);
+      overlay('Finish!');
+      if (S.local) {
+        showResult({ local: true, level: S.level, rawMs, stars: car.stars.length, finalMs: Math.max(0, rawMs - car.stars.length * STAR_BONUS_MS), stats: raceStats() });
+      } else {
+        send({ t: 'finish', rawMs, stars: car.stars.length, stats: raceStats() });
+      }
+    } else if (!face) {
+      overlay("Can't see your face", true);
+    } else if ($('race-overlay').classList.contains('msg')) {
+      overlay('');
+    }
+  }
+  world?.setCar({ x: car.x, y: car.y, z: car.z, h: car.h, v: car.v, vz: car.vz, steer: car.steer, air: car.air, boost: car.boost });
+  $('cam-slot-race').classList.toggle('lost', !face);
+  setMeters('r-steer', 'r-go', bossPreview(S.level, it, sig));
+  drawMinimap(car);
+}
+
+$('btn-stop').onclick = () => {
+  if (!S.local) send({ t: 'stop' });
+  endLocalRun('You stopped the run.');
+};
+
+function endLocalRun(message) {
+  if (['setup', 'home', 'lesson', 'lessondone'].includes(S.phase)) return;
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  if (S.phase === 'racing' && S.profile) {
+    // Stopped races still count as practice time.
+    addPractice(S.profile, localDay(), { ms: Math.min(150000, performance.now() - S.raceStart) });
+    saveProfile();
+  }
+  S.phase = 'done';
+  S.queued = false;
+  overlay('');
+  $('res-level').textContent = raceTitle(S.level);
+  $('res-title').textContent = 'Run stopped';
+  $('res-time').parentElement.classList.add('hidden');
+  $('res-banner').classList.add('hidden');
+  $('res-detail').textContent = message;
+  $('res-stats').innerHTML = '';
+  $('res-stats-title').classList.add('hidden');
+  $('btn-again').innerHTML = '<span data-icon="play">Try again</span>';
+  mountIcons($('btn-again'));
+  show('s-result');
+  scene(S.track, 'showcase', 0.6);
+}
+
+const sec = (ms) => `${(ms / 1000).toFixed(1)} s`;
+const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const RESULT_ROWS = {
+  u1: (st) => [['Time steady', sec(st.goHoldMs)], ['Wall bumps', st.wallHits]],
+  u2: (st) => [['Head moves', st.headMoves], ['Wall bumps', st.wallHits]],
+  u3: (st) => [['Mouth openings', st.goMoves], ['Mouth open', sec(st.goHoldMs)], ['Wall bumps', st.wallHits]],
+  u4: (st) => [['Puckers', st.goMoves], ['Jumps', st.jumps ?? 0], ['Wall bumps', st.wallHits]],
+};
+
+function showResult(r) {
+  S.phase = 'done';
+  const level = r.level || 'gp';
+  const prevBest = S.profile?.bosses[level]?.bestMs;
+  const ms = level === 'gp' ? r.finalMs : r.rawMs;
+  const out = S.profile ? withAwards(() => recordBoss(S.profile, level, { ms: r.rawMs, finished: true }, localDay())) : { xp: 0 };
+  if (S.profile && level === 'gp') {
+    const b = (S.profile.bosses.gp ||= { cleared: false, bestMs: null });
+    b.bestMs = b.bestMs == null ? ms : Math.min(b.bestMs, ms);
+  }
+  if (S.profile) saveProfile();
+  if (r.local && S.profile) send({ t: 'practice', kind: 'race', local: true, name: S.profile.name, unit: level, xp: out.xp, ms: r.rawMs });
+  const pb = prevBest != null && ms < prevBest;
+  S.timers.push(setTimeout(() => {
+    overlay('');
+    $('res-level').textContent = `${raceTitle(level)}${r.local ? ' · on this phone' : ''}`;
+    $('res-time').textContent = fmt(r.finalMs);
+    $('res-time').parentElement.classList.remove('hidden');
+    let banner;
+    let icon = 'flag';
+    if (level !== 'gp') {
+      $('res-title').textContent = out.firstClear ? 'Boss cleared!' : `${levelName(level)} done`;
+      icon = 'star';
+      banner = out.nextUp ? `Next unit on the path: ${out.nextUp}` : pb ? `New best, ${fmt(prevBest - ms)} faster` : out.firstClear ? 'Every unit cleared!' : 'Nice driving';
+    } else if (r.local) {
+      $('res-title').textContent = 'Finished';
+      banner = pb ? `New personal best, ${fmt(prevBest - ms)} faster` : 'Phone runs stay off the leaderboard';
+      icon = pb ? 'star' : 'phone';
+    } else {
+      $('res-title').textContent = 'Finished';
+      icon = r.personalBest ? 'star' : 'flag';
+      banner = r.personalBest
+        ? r.prevBestMs ? `New personal best, ${fmt(r.prevBestMs - r.finalMs)} faster` : 'Your first time on the board'
+        : `Your best is still ${fmt(r.prevBestMs)}`;
+    }
+    $('res-banner').innerHTML = `${iconSvg(icon)}<span>${esc(banner)}</span>`;
+    $('res-banner').classList.remove('hidden');
+    const xpText = out.xp ? ` +${out.xp} XP.` : '';
+    const goalText = out.goalJustMet ? ' Daily goal done!' : '';
+    $('res-detail').textContent = level === 'gp'
+      ? `Drive time ${fmt(r.rawMs)}, minus ${r.stars} star${r.stars === 1 ? '' : 's'} × ${STAR_BONUS_MS / 1000} s.${r.rank ? ` You're #${r.rank} on the leaderboard.` : ''}${xpText}${goalText}`
+      : `Drive time ${fmt(r.rawMs)}. Stars took ${r.stars * (STAR_BONUS_MS / 1000)} s off.${xpText}${goalText}`;
+    const st = r.stats || {};
+    const rows = RESULT_ROWS[level]?.(st) ?? (S.mode === 'head'
+      ? [['Head moves', st.headMoves], [`${capital(S.cal?.goLabel || 'GO move')} reps`, st.goMoves], ['GO held', sec(st.goHoldMs)], ['Jumps', st.jumps ?? 0], ['Wall bumps', st.wallHits]]
+      : [['Big steers', st.headMoves], ['Go presses', st.goMoves], ['Go held', sec(st.goHoldMs)], ['Jumps', st.jumps ?? 0], ['Wall bumps', st.wallHits]]);
+    $('res-stats').innerHTML = [['Stars', `${r.stars}/${S.track.stars.length}`], ...rows].map(([l, v]) => `<div><span>${esc(l)}</span><b>${esc(v)}</b></div>`).join('');
+    $('res-stats-title').classList.remove('hidden');
+    $('btn-again').innerHTML = `<span data-icon="play">${r.local ? 'Race again on this phone' : 'Race again'}</span>`;
+    mountIcons($('btn-again'));
+    show('s-result');
+    scene(S.track, 'showcase', 0.62);
+    $('s-result').querySelector('.sheet').scrollTop = 0;
+    if (out.goalJustMet) toast('Daily goal done!', { icon: 'flame', kind: 'gold' });
+  }, 1000)); // let the finish moment land before the sheet comes up
+}
+
+$('btn-again').onclick = () => startRace(S.level, { local: S.local });
+$('btn-res-path').onclick = goHome;
+
+// ---------- Menu: progress, achievements, settings, about ----------
+function openMenu(tab = 'progress') {
+  if (!S.profile) return;
+  renderMenu();
+  setTab(tab);
+  show('s-menu');
+}
+function setTab(tab) {
+  document.querySelectorAll('#s-menu .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+  document.querySelectorAll('#s-menu .tab-body').forEach((b) => b.classList.toggle('active', b.dataset.body === tab));
+  $('s-menu').querySelector('.sheet').scrollTop = 0;
+}
+document.querySelector('#s-menu .tabs').onclick = (e) => {
+  const b = e.target.closest('.tab');
+  if (b) setTab(b.dataset.tab);
+};
+$('btn-menu-close').onclick = goHome;
+
+function renderMenu() {
+  const p = S.profile;
+  if (!p) return;
+  const day = localDay();
+  const lv = xpLevel(p.xp);
+  const days = Object.values(p.days || {});
+  const total = (f) => days.reduce((a, d) => a + (f(d) || 0), 0);
+  const pp = pathProgress(p);
+  const wv = weekView(p, day);
+  const tiles = [
+    ['bolt', `Level ${lv.level}`, 'Player level', `${p.xp} XP · ${lv.to - p.xp} to go`],
+    ['clock', fmtMin(total((d) => d.ms) / 60000), 'Minutes practised', `on ${days.filter((d) => d.ms > 0).length} day${days.filter((d) => d.ms > 0).length === 1 ? '' : 's'}`],
+    ['gate', total((d) => d.good), 'Gates opened', `${total((d) => d.reps)} reps in all`],
+    ['map', `${pp.done}/${pp.total}`, 'Stops done', `${pp.gold} gold`],
+    ['flame', `${wv.streak} wk`, 'Week streak', `${wv.count} of ${wv.target} days this week`],
+    ['car', UNITS.filter((u) => p.bosses[u.id]?.cleared).length, 'Bosses cleared', `of ${UNITS.length}`],
+  ];
+  $('m-tiles').innerHTML = tiles.map(([ic, b, s, sm]) => `<div class="tile">${iconSvg(ic)}<span>${esc(s)}</span><b>${esc(b)}</b><small>${esc(sm)}</small></div>`).join('');
+
+  // The last 14 days
+  const list = Array.from({ length: 14 }, (_, i) => {
+    const d = addDays(day, i - 13);
+    const e = p.days[d];
+    return { d, min: (e?.ms || 0) / 60000, met: !!e?.goalMet, today: d === day };
+  });
+  const top = Math.max(p.goalMin * 1.25, ...list.map((x) => x.min));
+  const H = 90;
+  $('m-chart').innerHTML = list.map((x) => `<div class="col${x.met ? ' met' : ''}${x.today ? ' today' : ''}" title="${x.d}: ${fmtMin(x.min)} min"><i style="height:${Math.max(3, (x.min / top) * H).toFixed(1)}px"></i><span>${'MTWTFSS'[(new Date(`${x.d}T12:00:00`).getDay() + 6) % 7]}</span></div>`).join('')
+    + `<div class="goal" style="--y:${((p.goalMin / top) * H).toFixed(1)}px" aria-hidden="true"><span>${p.goalMin} min</span></div>`;
+  $('m-chart-note').textContent = `Minutes per day for the last two weeks. Green bars hit your ${p.goalMin}-minute goal.`;
+
+  const rows = rangeRows(p);
+  $('m-ranges').innerHTML = rows.length
+    ? rows.map((r) => `<div class="range"><span>${esc(r.label)}</span><div class="bar"><i style="width:100%"></i><em style="left:${(r.frac * 100).toFixed(1)}%"></em></div><small>${esc(r.text)}</small></div>`).join('')
+      + '<p class="hint">The dark mark is day 1. The bar is your best since.</p>'
+    : '<p class="hint">Play a "Find it" lesson to measure your range. Come back another day to see it grow.</p>';
+
+  $('m-mastery').innerHTML = UNITS.map((u, ui) => {
+    const L = lessonsOf(p, u.id);
+    const b = p.bosses[u.id];
+    return `<div class="m-unit ${COLOR_CLASS[ui]}"><h4><span class="region-num">${ui + 1}</span>${esc(u.title)}</h4>${L.map((l, li) => {
+      const max = knobFor(u.id, KINDS[li].key).max;
+      const pips = Array.from({ length: max + 1 }, (_, k) => `<i class="${k <= l.level && l.plays ? 'on' : ''}"></i>`).join('');
+      const state = isGold(l) ? ' · gold' : '';
+      return `<div class="m-row"><span><b>${KINDS[li].title}</b><small>${l.plays ? `last ${Math.round((l.lastRate || 0) * 10)}/10${state}` : 'not played'}</small></span><span class="lv" title="Level ${l.level + 1} of ${max + 1}">${pips}</span><span class="lvn">Lv ${l.level + 1}</span></div>`;
+    }).join('')}<div class="m-row boss"><span><b>Boss: ${esc(u.boss.name)}</b><small>${b?.cleared ? 'cleared' : 'not cleared yet'}</small></span><span></span><span class="lvn">${b?.bestMs ? fmt(b.bestMs) : ''}</span></div></div>`;
+  }).join('');
+
+  const aw = achievements(p, day);
+  $('m-awards-count').textContent = `${aw.filter((a) => a.done).length} of ${aw.length} earned`;
+  $('m-awards').innerHTML = aw.map((a) => `<li class="award${a.done ? ' done' : ''}"><span class="medal">${iconSvg(a.done ? 'medal' : 'lock')}</span><div><b>${esc(a.title)}</b><p>${esc(a.what)}</p><div class="prog"><div class="bar"><i style="width:${((a.have / a.need) * 100).toFixed(1)}%"></i></div><small>${a.have}/${a.need}</small></div></div></li>`).join('');
+
+  $('m-controls').textContent = S.mode === 'head'
+    ? S.cal ? `You use the camera. You ${S.cal.steerLabel} to steer and ${S.cal.goLabel} to go.` : 'You use the camera. Head setup is not done yet.'
+    : 'You use touch. Slide sideways for left and right, and drag up for face moves.';
+  $('btn-m-controls').innerHTML = `<span data-icon="${S.mode === 'head' ? 'hand' : 'camera'}">${S.mode === 'head' ? 'Use touch instead' : 'Use the camera'}</span>`;
+  $('btn-m-recal').classList.toggle('hidden', S.mode !== 'head');
+  mountIcons($('s-menu'));
+}
+$('btn-m-recal').onclick = () => (tracker.lm ? runCalibration(goHome) : show('s-camera'));
+$('btn-m-controls').onclick = () => {
+  if (S.mode === 'head') {
+    S.mode = 'touch';
+    toast('Touch controls on', { icon: 'hand' });
+    goHome();
+  } else {
+    show('s-camera');
+  }
+};
+$('btn-m-name').onclick = () => {
+  S.phase = 'setup';
+  show('s-name');
+  scene(raceTrack('gp'), 'showcase', 0.55);
+};
+
+// ---------- Main loop ----------
+let last = performance.now();
+let worldAcc = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (S.mode === 'head') tracker.update();
+  const sig = readSignals();
+  const it = readIntent();
+  const inRace = S.car && (S.phase === 'countdown' || S.phase === 'racing' || (S.phase === 'done' && $('s-race').classList.contains('active')));
+  const inLesson = S.phase === 'lesson';
+
+  if (S.phase === 'waiting') {
+    setMeters('w-steer', 'w-go', bossPreview(S.level, it, sig));
+    badge('wait-badge');
+  } else if (S.phase === 'setup') {
+    badge('cal-badge');
+  } else if (S.phase === 'turn') {
+    const left = Math.max(0, S.claimEnds - now);
+    $('turn-timer').textContent = `${Math.ceil(left / 1000)} s left to start`;
+    if (it.go > 0.5 && !S.holdStart) S.holdStart = now;
+    if (it.go < 0.3) S.holdStart = 0;
+    const held = S.holdStart ? (now - S.holdStart) / 1000 : 0;
+    fillBar('turn-hold', held);
+    if (held >= 1) $('btn-start').onclick();
+  }
+  if (inRace) raceFrame(dt, it, sig);
+  if (inLesson) lessonFrame(dt, sig);
+
+  // Menus render the world at ~30 fps to leave room for face tracking.
+  worldAcc += dt;
+  if (world && (inRace || inLesson || worldAcc > 1 / 30)) {
+    world.frame(inRace || inLesson ? dt : worldAcc);
+    worldAcc = 0;
+  }
+  requestAnimationFrame(frame);
+}
+
+function badge(id) {
+  const el = $(id);
+  const ok = S.mode !== 'head' || tracker.faceVisible;
+  const want = ok ? 'face' : 'search';
+  if (el.dataset.icon !== want) {
+    el.dataset.icon = want;
+    el.textContent = ok ? 'Face found' : 'Looking for you';
+    el.className = `badge${ok ? '' : ' lost'}`;
+    delete el.dataset.mounted;
+    mountIcons(el.parentElement);
+  }
+}
+requestAnimationFrame(frame);
+
+// ---------- Keep the screen on ----------
+async function keepAwake() {
+  try {
+    await navigator.wakeLock?.request('screen');
+  } catch { /* not supported */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && S.phase !== 'setup') keepAwake();
+});
+
+connect();

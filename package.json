@@ -1,0 +1,16 @@
+{
+  "name": "rc-race",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Head-controlled virtual race course mirrored onto a real RC car via ESP32",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/sim.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  }
+}
