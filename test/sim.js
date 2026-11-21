@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
-import { newCar, step, pointAt, ASSIST, STARS, TRACK_LENGTH } from '../public/game.js';
+import { newCar, step, pointAt, ASSIST, STARS, TRACK_LENGTH, realSteer } from '../public/game.js';
 import { buildCalibration, toIntent, toSignals, rangeFrom } from '../public/head.js';
 import {
   UNITS, KINDS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode, recordLesson, recordBoss,
@@ -89,6 +89,19 @@ for (let level = 0; level < ASSIST.length; level++) {
   const small = (sens) => Math.abs(toIntent(cal, sample(0.3 * 0.4, 0, 0.02), sens).steer);
   check(small('gentle') < small('normal') && small('normal') < small('sharp') && small('normal') < 0.3,
     `A small head tilt (40%) steers gently: gentle ${small('gentle').toFixed(2)}, normal ${small('normal').toFixed(2)}, sharp ${small('sharp').toFixed(2)}`);
+  // Grand Prix: head steers the car on screen, and the real car's on/off steering follows.
+  {
+    const FIRMWARE_THRESHOLD = 0.35;
+    const half = toIntent(cal, sample(0.3 * 0.45, 0, 0.9), 'normal'); // 45% head tilt left + mouth open
+    const car = newCar();
+    for (let i = 0; i < 30; i++) step(car, half.steer, 1, 1 / 30);
+    const h0 = newCar().h;
+    const turned = Math.atan2(Math.sin(car.h - h0), Math.cos(car.h - h0));
+    const sent = realSteer(car.steerOut);
+    const wobble = realSteer(toIntent(cal, sample(0.3 * 0.2, 0, 0.02), 'normal').steer);
+    check(half.go > 0.9 && turned < -0.05 && sent < -FIRMWARE_THRESHOLD && wobble === 0,
+      `Head turn steers the Grand Prix car (heading ${turned.toFixed(2)} rad) and the real car presses LEFT (sent ${sent.toFixed(2)}); a 20% wobble sends nothing`);
+  }
   const bad = buildCalibration({
     neutral: many(() => sample(0, 0, 0.02)),
     left: many(() => sample(0.01, 0, 0.02)),
@@ -401,7 +414,9 @@ try {
   phone2.ws.terminate();
   car.inbox.length = 0;
   await wait(300);
-  check(car.inbox.length > 0 && car.inbox.every((m) => m === 'd 0 0'), 'Driver disconnect mid-race stops the car');
+  // A drive command already in flight when the phone dropped may still land; after the first stop, nothing else may.
+  const firstStop = car.inbox.indexOf('d 0 0');
+  check(firstStop >= 0 && firstStop <= 1 && car.inbox.slice(firstStop).every((m) => m === 'd 0 0'), 'Driver disconnect mid-race stops the car');
   check(!!(await screen.until((s) => isT('run_end')(s) && JSON.parse(s).reason === 'disconnected')), 'Big screen shows the run ended');
 
   // Sam races again, slower then faster -> most improved.

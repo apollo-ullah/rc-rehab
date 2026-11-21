@@ -48,6 +48,15 @@ export function newCar(track = GP) {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+// The real car's steering buttons are on/off: the firmware presses LEFT/RIGHT past 0.35.
+// The head curve keeps on-screen steering gentle, so a clear turn on screen is sent as at
+// least a firm press. Tiny corrections stay released so the real car doesn't twitch.
+export const REAL_STEER_MIN = 0.15;
+export function realSteer(s) {
+  const a = Math.abs(s);
+  return a < REAL_STEER_MIN ? 0 : Math.sign(s) * Math.min(1, 0.45 + 0.55 * a);
+}
+
 // Steering that follows the road by itself. Used when an exercise only controls the speed
 // (practice lessons, most boss races) and by ?autopilot.
 export function autoSteer(car, track = car.track || GP) {

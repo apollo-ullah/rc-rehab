@@ -22,9 +22,9 @@ npm start
 
 The quick-tunnel link changes every time you restart, but the QR code updates by itself.
 
-Test without hardware: `npm test` (68 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, and full races through the server with a fake phone and a fake car).
+Test without hardware: `npm test` (69 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, and full races through the server with a fake phone and a fake car).
 Test without a camera: on the phone, tap "Use touch controls instead". In lessons, slide sideways for left/right and drag up for face moves. On a laptop, the arrow keys / WASD also work.
-Demo without a face: open `<link>/?autopilot` and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races.
+Demo without a face: open `<link>/?autopilot` and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
 No real car? Boss races and the Grand Prix have **Play on this phone**: the same race without the line or the car. It counts for practice and XP and is marked "(phone)" in the CSV, but stays off the leaderboard.
 
 ## ESP32 setup
@@ -38,7 +38,7 @@ No real car? Boss races and the Grand Prix have **Play on this phone**: the same
    - `x`: release everything
 5. With `npm start` running, the big screen should say **Car connected**.
 
-**How speed is mirrored with on/off buttons:** the forward button is pulsed (every 120 ms). 50% speed on screen means pressed 50% of the time. Tune `SPEED_SCALE` (start around 0.5 indoors), `PULSE_PERIOD_MS` and `MIN_DUTY`. Steering is on/off past `STEER_THRESHOLD`. Set `STEER_PULSE = true` to try partial turns.
+**How speed is mirrored with on/off buttons:** the forward button is pulsed (every 120 ms). 50% speed on screen means pressed 50% of the time. Tune `SPEED_SCALE` (start around 0.5 indoors), `PULSE_PERIOD_MS` and `MIN_DUTY`. Steering is on/off past `STEER_THRESHOLD` (0.35). Head steering on screen is deliberately gentle, so the phone sends any clear turn (0.15 or more, about 40% of your calibrated head movement) as at least a 0.53 press, and tiny wobbles as 0. Set `STEER_PULSE = true` to try partial turns.
 
 **Safety:** all buttons are released if no command arrives for 300 ms, if the driver's phone disconnects, if the driver hits STOP, or if the host hits STOP on the big screen.
 
@@ -54,7 +54,9 @@ The home screen has an **Up next** card (the suggested stop, today's minutes and
 | 2 Left and right | Turn or tilt to each side (whichever head setup picked) | **Curvy Road**: you steer; it drives itself |
 | 3 Open and close | Jaw | **Mouth Pedal**: wider mouth = faster; steers itself |
 | 4 Lips | Pucker and smile | **Kiss Boost**: pucker to boost; steers itself |
-| Together | Head + GO move | **Grand Prix**: the original race and leaderboard, open any time |
+| Together | Head + GO move | **Grand Prix**: your head steers and your GO move (mouth, eyebrows, smile, pucker or cheeks, picked in head setup) drives. The original race and leaderboard, open any time from the home screen |
+
+Only the Grand Prix and Curvy Road are steered by your head. The other boss races and all lessons practise one move, so the car steers itself; each race's card lists its steering and GO controls.
 
 **Lessons are courses.** Each of the 20 lessons has its own course (Calm Bay, Long Pier, Lily Pads… Pine Avenue, Red Rock Rise, Shell Shore, Wave Hop and so on), shaped for its exercise: Hold courses have long straights, Aim courses are S-bends, Quick courses are tight turns, and Mix courses are the longest. The car drives itself and stops at each of the 10 gates. The rep you do there opens the gate: a good rep lifts the arm with a green light and a burst of speed, and a miss lifts it too, so you always reach the finish. The drive between gates is the rest between reps. If the camera loses your face, the car waits. The bar at the top shows the course, each gate's result and where the car is.
 

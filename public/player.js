@@ -1,4 +1,4 @@
-import { newCar, step, autoSteer, STAR_BONUS_MS, ASSIST } from './game.js';
+import { newCar, step, autoSteer, realSteer, STAR_BONUS_MS, ASSIST } from './game.js';
 import { HeadTracker, buildCalibration, toIntent, toSignals, rangeFrom, rangeFromCalibration } from './head.js';
 import {
   UNITS, KINDS, GRAND_PRIX, XP, FACE_SIGS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode,
@@ -494,6 +494,7 @@ function renderHome() {
     $('h-next-tag').textContent = p.xp ? 'up next' : 'start here';
     $('h-hero-note').textContent = t.name.toLowerCase();
     $('btn-continue').innerHTML = `<span data-icon="play">${nx.li === 5 ? 'See the race' : 'Start'}</span>`;
+    $('btn-gp').classList.remove('hidden');
   } else {
     $('h-next-unit').textContent = 'Together';
     $('h-next-title').textContent = 'Every stop is done!';
@@ -502,6 +503,7 @@ function renderHome() {
     $('h-next-tag').textContent = 'well done';
     $('h-hero-note').textContent = 'grand prix';
     $('btn-continue').innerHTML = '<span data-icon="trophy">Race the Grand Prix</span>';
+    $('btn-gp').classList.add('hidden');
   }
   const tv = todayView(p, day);
   $('h-ring').style.setProperty('--p', tv.frac.toFixed(3));
@@ -577,10 +579,24 @@ $('btn-continue').onclick = () => {
   if (nx.li === 5) return openStop(nx.ui, 5);
   startLesson(nx.ui, nx.li);
 };
+$('btn-gp').onclick = () => openStop(-1, -1);
 $('btn-me').onclick = () => openMenu('progress');
 $('btn-menu').onclick = () => openMenu('progress');
 
 // ---------- A stop: a lesson, a boss race or the Grand Prix ----------
+// How each race is controlled. Only the Grand Prix and Curvy Road are steered by you;
+// the other boss races practise one move, so the car steers itself.
+function raceControls(level) {
+  const head = S.mode === 'head';
+  const you = head ? capital(S.cal?.steerLabel || 'your head') : 'Slide your finger';
+  switch (level) {
+    case 'u1': return ['By itself', 'Keep your head still'];
+    case 'u2': return [you, 'Rolls by itself'];
+    case 'u3': return ['By itself', head ? 'Open your mouth' : 'Drag up'];
+    case 'u4': return ['By itself', head ? 'Pucker to boost' : 'Drag up to boost'];
+    default: return [you, head ? capital(S.cal?.goLabel || 'your GO move') : 'Hold your finger down'];
+  }
+}
 function courseSvg(t) {
   const { d, map } = trackSvgPath(t, 120, 80, 9);
   const at = (dist) => map(t.pointAt(dist).x, t.pointAt(dist).y).map((v) => v.toFixed(1));
@@ -617,7 +633,7 @@ function openStop(ui, li) {
     $('st-unit').textContent = 'Together · head and face';
     $('st-title').textContent = GRAND_PRIX.name;
     $('st-what').textContent = `${GRAND_PRIX.how} Times go on the big screen's leaderboard.`;
-    facts = [['Your races', String(p.counts?.gp || 0)], ['Best time', p.bosses.gp?.bestMs ? fmt(p.bosses.gp.bestMs) : 'Not yet'], ['Reward', `+${XP.gp} XP`]];
+    facts = [['Steering', raceControls('gp')[0]], ['Go', raceControls('gp')[1]], ['Best time', p.bosses.gp?.bestMs ? fmt(p.bosses.gp.bestMs) : 'Not yet'], ['Your races', String(p.counts?.gp || 0)]];
   } else {
     const u = UNITS[ui];
     $('st-unit').textContent = `Unit ${ui + 1} · ${u.title}`;
@@ -625,7 +641,7 @@ function openStop(ui, li) {
       const b = p.bosses[u.id];
       $('st-title').textContent = `Boss race: ${u.boss.name}`;
       $('st-what').textContent = u.boss.how;
-      facts = [['Best time', b?.bestMs ? fmt(b.bestMs) : 'Not yet'], ['Cleared', b?.cleared ? 'Yes' : 'Not yet'], ['Reward', `+${XP.boss} XP`]];
+      facts = [['Steering', raceControls(u.id)[0]], ['Go', raceControls(u.id)[1]], ['Best time', b?.bestMs ? fmt(b.bestMs) : 'Not yet'], ['Cleared', b?.cleared ? 'Yes' : 'Not yet']];
       if (!lessonsOf(p, u.id).every((l) => l.done)) note = `The five ${u.title} lessons practise this move first, but you can race now.`;
     } else {
       const k = KINDS[li];
@@ -716,7 +732,8 @@ function startLesson(ui, li) {
   world?.reset();
   world?.setCar(course.car);
   document.querySelector('#s-lesson .course-bar').className = `course-bar panel slim ${COLOR_CLASS[ui]}`;
-  $('l-course').textContent = `${track.name} · ${KINDS[li].title}`;
+  $('l-course').textContent = `${track.name} · ${KINDS[li].title}${AUTOPILOT ? ' · autopilot' : ''}`;
+  tellAutopilot();
   $('l-track').innerHTML = '<i class="cb-fill" id="l-fill"></i>'
     + track.gates.map((d, i) => `<span class="cb-gate" data-g="${i}" style="left:${((d / track.finishAt) * 100).toFixed(2)}%"></span>`).join('')
     + '<span class="cb-flag"></span><span class="cb-car" id="l-car"></span>';
@@ -742,7 +759,16 @@ $('btn-tired').onclick = () => finishLesson(true);
 $('btn-l-finish').onclick = () => finishLesson(true);
 $('btn-l-quit').onclick = () => finishLesson(true);
 
-// ?autopilot: a stand-in player that does every rep (for demos and testing without a face).
+// ?autopilot: a stand-in player for demos without a face. It only plays while nobody else is:
+// a calibrated face in view, a finger on the screen or a key held takes over straight away.
+const playerActive = () => (S.mode === 'head' && !!S.cal && tracker.faceVisible) || S.touch.active || S.keys.size > 0;
+const autopilotNow = () => AUTOPILOT && !playerActive();
+let autopilotTold = false;
+function tellAutopilot() {
+  if (!AUTOPILOT || autopilotTold) return;
+  autopilotTold = true;
+  toast(S.mode === 'head' ? 'Autopilot is on until it sees your face' : 'Autopilot is on until you touch the screen', { icon: 'car' });
+}
 const bot = { v: 0 };
 function botSignals(run, dt) {
   const w = run.want();
@@ -761,7 +787,7 @@ function botSignals(run, dt) {
 
 function lessonFrame(dt, sig) {
   const L = S.lesson;
-  const { view, ev, gateEvent } = L.course.update(AUTOPILOT ? botSignals(L.run, dt) : sig, dt);
+  const { view, ev, gateEvent } = L.course.update(autopilotNow() ? botSignals(L.run, dt) : sig, dt);
   if (!view.lost && L.course.mode !== 'done') L.activeMs += dt * 1000;
   if (gateEvent) {
     world?.setGate(gateEvent.i, gateEvent.ok ? 'good' : 'miss');
@@ -1068,7 +1094,8 @@ function startCountdownView() {
   show('s-race');
   $('hud-time').textContent = '0.0';
   $('hud-stars').textContent = `0/${S.track.stars.length}`;
-  $('hud-name').textContent = `${S.level === 'gp' ? S.track.name : levelName(S.level)}${S.local ? ' · phone' : ''}`;
+  $('hud-name').textContent = `${S.level === 'gp' ? S.track.name : levelName(S.level)}${S.local ? ' · phone' : ''}${AUTOPILOT ? ' · autopilot' : ''}`;
+  tellAutopilot();
   $('r-go-label').textContent = S.level === 'gp' ? 'Go' : GO_LABEL[S.level];
   $('r-steer-wrap').classList.toggle('hidden', !(S.level === 'gp' || S.level === 'u2')); // the other races steer themselves
   drawMinimapBase();
@@ -1137,8 +1164,8 @@ function readIntent() {
     go = 1;
     steer = clamp((S.touch.x - S.touch.x0) / 110, -1, 1);
   }
-  // ?autopilot drives races by itself: for testing the real car without head setup.
-  if (AUTOPILOT && S.car && (S.phase === 'racing' || S.phase === 'countdown')) {
+  // ?autopilot drives races by itself (testing the real car without head setup) until you take over.
+  if (autopilotNow() && S.car && (S.phase === 'racing' || S.phase === 'countdown')) {
     steer = autoSteer(S.car);
     go = 0.85;
     lost = false;
@@ -1254,9 +1281,11 @@ function raceStats() {
 
 function raceFrame(dt, it, sig) {
   const car = S.car;
-  const face = S.mode === 'head' ? sig.face : true;
+  const auto = autopilotNow();
+  const face = auto || S.mode !== 'head' || sig.face;
   if (S.phase === 'racing') {
-    const ctl = S.level === 'gp' || AUTOPILOT ? it : bossControl(S.level, it, sig, car);
+    // Grand Prix: your head steers and your GO move drives. Boss races use their unit's move.
+    const ctl = S.level === 'gp' || auto ? it : bossControl(S.level, it, sig, car);
     const ev = step(car, ctl.steer, ctl.go, dt, S.assist);
     countStats(ctl, dt, ev);
     world?.fx(ev);
@@ -1268,7 +1297,7 @@ function raceFrame(dt, it, sig) {
       S.lastSend = performance.now();
       send({
         t: 'state', x: car.x, y: car.y, z: car.z, h: car.h, v: car.v,
-        cs: car.steerOut, ct: car.throttleOut, stars: car.stars, air: car.air, boost: car.boost > 0,
+        cs: realSteer(car.steerOut), ct: car.throttleOut, stars: car.stars, air: car.air, boost: car.boost > 0,
       });
     }
     if (car.finished) {
