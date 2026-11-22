@@ -1699,7 +1699,7 @@ $('a-name').addEventListener('keydown', (e) => e.key === 'Enter' && $('btn-a-pla
 if (ARCADE) {
   $('btn-res-path').innerHTML = '<span data-icon="people">Next player</span>';
   mountIcons($('btn-res-path'));
-  document.title = 'Head Racer Arcade';
+  document.title = 'RC-Rehab Arcade';
 }
 
 // ---------- Menu: progress, achievements, settings, about ----------
@@ -2119,7 +2119,7 @@ $('btn-ac-demo').onclick = openDemo;
 
 if (ARMS) {
   for (const id of ['btn-demo', 'btn-name-demo']) $(id).classList.remove('hidden');
-  document.title = 'Head Racer · Arm path';
+  document.title = 'RC-Rehab · Arm path';
   $('name-hand').textContent = 'arm path';
   $('name-intro').textContent = 'Biceps exercises with two muscle sensors that see whether each arm is flexing. Every lesson is its own little course: open each gate by squeezing or relaxing on cue, then drive on to the finish line.';
 }

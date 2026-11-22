@@ -1,4 +1,4 @@
-// Head Racer — ESP32 firmware
+// RC-Rehab — ESP32 firmware
 //
 // The game server sends "d <steer> <throttle>" about 20 times a second
 // (each -1000..1000). This sketch turns that into button presses on the
@@ -194,7 +194,7 @@ void setup() {
   releaseAll();  // first thing: nothing pressed
   Serial.begin(115200);
   delay(200);
-  Serial.println("\nHead Racer car starting");
+  Serial.println("\nRC-Rehab car starting");
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // lower latency

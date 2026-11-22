@@ -1,4 +1,4 @@
-// Head Racer — arm sensors (EMG) ESP32 for the Arm path
+// RC-Rehab — arm sensors (EMG) ESP32 for the Arm path
 //
 // Two biceps EMG sensors, one per arm. This sketch decides "flexing or not" for each arm and
 // sends one line to the game:
@@ -154,7 +154,7 @@ void handleSerial() {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\nHead Racer arm sensors starting");
+  Serial.println("\nRC-Rehab arm sensors starting");
   analogReadResolution(12);
   for (auto& a : arms) pinMode(a.pin, INPUT);
   if (!DIGITAL_INPUTS) calibrateRelaxed();

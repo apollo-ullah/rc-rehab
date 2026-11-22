@@ -27,7 +27,7 @@ class DriveEvents : public BLECharacteristicCallbacks {
   }
 };
 
-// Head Racer's game page (public/musclecar.js) writes two bytes instead: power for the left and
+// RC-Rehab's game page (public/musclecar.js) writes two bytes instead: power for the left and
 // right wheels, 0-255 each. The board pulses each button so the car runs slower than full speed:
 // at 40% power the button is held for 40% of every PULSE_MS. Also expires on heartbeat loss.
 constexpr unsigned long PULSE_MS = 80;     // one on/off cycle

@@ -1,4 +1,4 @@
-# Head Racer
+# RC-Rehab
 
 A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The first screen (`/`) asks which of the three modes you want:
 
@@ -31,7 +31,7 @@ npx vercel deploy --prod                       # prints the app's link
 
 After a code change, run `npx vercel deploy --prod` again. The saved data stays. Connections that were already open stay on the old version until they reconnect (at most 5 minutes), so for a minute or two the old version may still be running the game.
 
-Live: **https://head-racer.vercel.app** (the first screen offers both modes).
+Live: **https://rc-rehab.vercel.app** (the old https://head-racer.vercel.app link still works). The first screen offers every mode.
 
 - **Arcade:** `<link>/arcade` skips the choice (handy on the event laptop). Anyone you share the link with can race; there is one line for the one real car, so racers take turns.
 - **Practice path:** `<link>/path` skips the choice.
