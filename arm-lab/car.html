@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RC wheel bench test</title><link rel="stylesheet" href="style.css"><main><h1>Wheel bench test</h1><p>Lift the wheels. Each button presses one remote input for ¼ second.</p><section class="panel"><button id="connect">Connect USB</button><p id="message" role="status">Disconnected</p><fieldset disabled id="pad"><legend>Wheel pulse</legend><button data-pin="5">Left forward</button> <button data-pin="4">Left backward</button> <button data-pin="7">Right forward</button> <button data-pin="6">Right backward</button> <button data-pin="0">Stop</button></fieldset></section></main><script type="module">
+const pad=document.querySelector('#pad'),msg=document.querySelector('#message'),connect=document.querySelector('#connect');
+let writer;
+connect.onclick=async()=>{connect.disabled=true;try{
+ const port=await navigator.serial.requestPort();await port.open({baudRate:115200});writer=port.writable.getWriter();pad.disabled=false;msg.textContent='USB connected';
+ port.addEventListener('disconnect',()=>{pad.disabled=true;connect.disabled=false;msg.textContent='Disconnected'});
+}catch(e){connect.disabled=false;msg.textContent=e.message}};
+pad.onclick=async e=>{if(!e.target.dataset.pin)return;try{await writer.write(new TextEncoder().encode(e.target.dataset.pin));msg.textContent='Sent · '+e.target.textContent}catch(err){pad.disabled=true;connect.disabled=false;msg.textContent=err.message}};
+</script></html>

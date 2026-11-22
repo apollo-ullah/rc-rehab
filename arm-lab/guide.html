@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Movement and placement guide · ArmLab</title>
+<style>*{box-sizing:border-box}body{margin:0 auto;padding:36px clamp(18px,5vw,70px) 74px;max-width:940px;color:#173337;background:#f5f8f5;font:1.04rem/1.65 system-ui,sans-serif}a{color:#076b63}h1,h2,h3{line-height:1.15;letter-spacing:-.035em}h1{font-size:clamp(2.3rem,6vw,4rem)}h2{font-size:1.8rem;margin-top:2em}article{border-top:1px solid #adc9c2;padding:10px 0}dt{font-weight:700}dd{margin:0 0 12px}li{margin-bottom:10px}</style>
+<a href="./">Back to recording</a><h1>Movement and placement guide</h1>
+<p>Use these six labels to collect training examples on an adult volunteer. Start on the palm side of the forearm for hand closing. Turn to the back of the forearm for wrist extension. Each placement gets a fresh calibration and its own recording session.</p>
+<h2>Fit the sensor</h2><p>Disconnect power and remove the sensor from skin before changing leads. Snap on the adhesive pads before applying them to clean, dry, intact skin. Place MID over the muscle belly, aim END along the fibers and keep REF attached. Support the lead so it cannot tug on the board. Stop for pain, irritation or fatigue. During on-body recording use a standalone battery with wireless data or suitable USB isolation. An ordinary USB hub still provides an electrical path to the computer. <a href="https://myoware.com/wp-content/uploads/2022/03/MyoWare_v2_QuickStartGuide.pdf">MyoWare quick start</a> · <a href="https://myoware.com/wp-content/uploads/2022/03/MyoWare_v2_AdvancedGuide-Updated.pdf">Placement diagrams</a> · <a href="https://learn.sparkfun.com/tutorials/getting-started-with-the-myoware-20-muscle-sensor-ecosystem/hardware-hookup">Power and isolation</a></p>
+<div id="sites"></div>
+<h2>From a label to a functional goal</h2><p>A pediatric occupational or physical therapist and the family would choose a meaningful goal, such as placing a checker on a board, and practice that complete task. Opening the hand for the checker and releasing it are observable parts of that goal. Measure success with the checker itself. A CP clinical guideline recommends practice tied to real hand-use goals. It does not establish a clinical benefit from this six-label EMG experiment. <a href="https://doi.org/10.1111/dmcn.15055">International clinical practice guideline, recommendation 11</a></p>
+<p>A three-child feasibility study found children with hemiplegia could engage in game-based hand practice at home with caregiver help and functional electrical stimulation. This supports investigating game-based engagement. ArmLab records voluntary activity with a passive sensor and has no pediatric outcomes data. <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443/">Home-based hand therapy game study</a></p>
+<p>The repetition counts in the recorder describe the data collection protocol for an adult. A child's clinician selects the movements, assistance, rest and dose for that child. Other causes of muscle weakness or atrophy require condition-specific review.</p>
+<h2>What the signal can support</h2><p>The three electrode pads produce one measurement channel. Nearby muscles, arm posture, electrode placement and effort can all change it. A strong reading during wrist extension is compatible with extensor activity. The same reading during finger opening may look very similar. Record comparable effort across labels, keep arm posture and placement repeatable, and have an observer confirm what actually moved.</p>
+<p>Evaluate predictions on new repetitions and count misses, false activations at rest and ambiguous trials. Repeat on another day after replacing the pads. A successful session on one adult cannot establish accuracy on a child. <a href="https://ninapro.hevs.ch/instructions/DB1.html">NinaPro multichannel hand movement benchmark</a></p>
+<script type="module">
+import {sites} from './bank.js';
+const evidence = {
+flexors:['https://doi.org/10.1109/ISSBES.2015.7435877','Forearm electrode position and wrist flexion','Practice goal example: Pick up a light game piece.'],
+extensors:['https://doi.org/10.1109/ISSBES.2015.7435877','Forearm electrode position and wrist extension','Practice goal example: Open the hand to release the game piece.'],
+biceps:['https://seniam.org/bicepsbrachii.html','SENIAM biceps placement','Practice goal example: Bring an empty cup toward the mouth or turn the palm to receive a token.']};
+for(const [key,site] of Object.entries(sites)){
+const [href,source,goal]=evidence[key];
+const section=document.createElement('article');
+section.innerHTML='<h2>'+site.name+'</h2><p>'+site.placement+'</p><dl>'+site.moves.map(m=>'<dt>'+m.name+'</dt><dd>'+m.cue+'</dd>').join('')+'</dl><p>'+goal+'</p><a href="'+href+'">'+source+'</a>';
+if(key==='biceps')section.insertAdjacentHTML('beforeend',' · <a href="https://pubmed.ncbi.nlm.nih.gov/20870527/">EMG during elbow flexion and supination</a>');
+document.querySelector('#sites').append(section);
+}
+</script></html>
