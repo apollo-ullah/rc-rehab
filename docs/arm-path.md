@@ -136,5 +136,5 @@ biceps → EMG sensor (e.g. MyoWare, envelope output) → ESP32 → wss://…/ap
   arm = turn left, both = straight.
 - Both-arms window: one arm alone only counts as a turn after 250 ms alone; both and none count at
   once. So a slightly late second arm still goes straight, and an uneven let-go doesn't swerve.
-- The Bluetooth car uses binary wheel buttons during local races, lessons and demo mode. Each calibrated bicep holds its forward wheel button while flexed. Relaxing both releases both buttons. Game speed and motor percentages do not gate these commands.
+- The Bluetooth car uses binary wheel buttons during local races, lessons and demo mode. Each calibrated bicep holds its forward wheel button while flexed. In Arm Grand Prix and demo, a two-arm squeeze holds both buttons through a one-arm dropout. Relax both before starting a new turn. Eight seconds after straight drive starts, it stops and requires both arms to rest. Losing the sensor stream also requires a fresh rest. Game speed and motor percentages do not gate these commands.
 - Lessons: between gates the car only moves while the arms give the direction the road needs.

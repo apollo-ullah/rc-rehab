@@ -6,7 +6,7 @@ import {
   unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
   unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
-import { buildArmLesson, ArmRun, armRaceControl, CAR_TUNE, armsFor, armDir, LEFT_ARM_STEER } from './arms.js';
+import { buildArmLesson, ArmRun, armRaceControl, StraightHold, CAR_TUNE, armsFor, armDir, LEFT_ARM_STEER } from './arms.js';
 import { mc, selectCutoff, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
@@ -1806,9 +1806,11 @@ $('btn-m-name').onclick = () => {
 // Left/Right lights work too, for testing or when there's no sensor.
 // Sensors: the MuscleCar board over Bluetooth first, else a WiFi sensor board through the server.
 const armOnline = () => mc.ready || S.emg.online;
+let straightHold;
+let driveFlex = [false, false];
 function readArms() {
   const ble = mc.ready;
-  const e = ble ? { l: mc.flex[0], r: mc.flex[1], online: true } : S.emg;
+  const e = ble ? { l: driveFlex[0], r: driveFlex[1], online: true } : S.emg;
   const k = S.keys;
   const kl = k.has('a') || k.has('A') || k.has('ArrowLeft') || S.armBtn.l;
   const kr = k.has('d') || k.has('D') || k.has('ArrowRight') || S.armBtn.r;
@@ -1921,7 +1923,7 @@ function mirrorRealCar() {
   const racing = bleDriving() && S.phase === 'racing';
   const lesson = ARMS && S.tune.follow && S.phase === 'lesson' && !S.lesson?.finishing;
   if (!mc.ready || !(racing || lesson || S.phase === 'demo')) return setWheels(false, false);
-  const [l, r] = mc.flex;
+  const [l, r] = driveFlex;
   if (S.armSwap !== S.tune.swapWheels) setWheels(r, l);
   else setWheels(l, r);
 }
@@ -2124,6 +2126,20 @@ if (ARMS) {
 let last = performance.now();
 let worldAcc = 0;
 function frame(now) {
+  const driving = S.phase === 'demo' || (S.phase === 'racing' && S.level === 'a4');
+  if (driving) {
+    straightHold ??= new StraightHold();
+    const wasLocked = straightHold.needsRest;
+    const live = mc.ready && !document.hidden && now - last < 300;
+    const confirmedRest = live && mc.adc.every((v, i) => v <= mc.cal[i].off);
+    driveFlex = straightHold.update(mc.flex, now, live, confirmedRest);
+    if (!wasLocked && straightHold.needsRest && mc.ready) {
+      toast('Drive paused. Relax both arms to drive again.', { icon: 'arm' });
+    }
+  } else {
+    straightHold = null;
+    driveFlex = mc.flex;
+  }
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (S.mode === 'head') tracker.update();

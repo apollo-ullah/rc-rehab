@@ -17,7 +17,7 @@ import {
   addPractice, weekView, progressLine, addDays, achievements, pathProgress, xpLevel, unitsOf,
 } from '../public/path.js';
 import {
-  buildArmLesson, ArmRun, armRaceControl, ArmChord, wheelMix, realMotion, arcMotion, CAR_TUNE, MIN_WHEEL, Pulser, FlexSwitch, armProfile, armDir,
+  buildArmLesson, ArmRun, armRaceControl, ArmChord, StraightHold, wheelMix, realMotion, arcMotion, CAR_TUNE, MIN_WHEEL, Pulser, FlexSwitch, armProfile, armDir,
 } from '../public/arms.js';
 import { LessonCourse } from '../public/course.js';
 import { raceTrack, lessonTrack, selfIntersects, RACE_IDS, LESSON_GATES } from '../public/tracks.js';
@@ -483,6 +483,19 @@ function idealSignals(w, v) {
   const dt = 1 / 60;
   // Both-arms window: one arm a moment ahead of the other still means straight on.
   const run = (fn, sec) => {
+    const hold = new StraightHold();
+    const held = (l, r, ms, live = true, rest = true) => {
+      const wheels = hold.update([l, r], ms, live, rest);
+      return Number(wheels[0]) + 2 * Number(wheels[1]);
+    };
+    check(held(1, 1, 0) === 3 && held(1, 0, 2000) === 3 && held(0, 1, 3000) === 3
+      && held(1, 1, 7900) === 3 && held(1, 0, 8000) === 0 && held(1, 1, 8100) === 0
+      && held(0, 0, 8200) === 0 && held(0, 1, 8300) === 2,
+      'Straight holds through either dropout, times out, and rearms only after rest');
+    check(held(1, 1, 9000) === 3 && held(1, 1, 9100, false) === 0
+      && held(0, 0, 9200, true, false) === 0 && held(1, 1, 9300) === 0
+      && held(0, 0, 9400) === 0 && held(1, 0, 9500) === 1,
+      'Signal loss stops straight drive until a confirmed rest');
     const c = new ArmChord();
     const seen = new Set();
     for (let t = 0; t < sec; t += dt) seen.add(armDir(c.update(...fn(t), dt)));

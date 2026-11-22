@@ -489,6 +489,33 @@ export function armRaceControl(level, sig, st, dt, autoSteer) {
 // arm alone turns the car right, the right arm alone turns it left, both drive straight.
 export const LEFT_ARM_STEER = 1;
 export const ARC_GO = 0.65; // one arm: a gentle forward curve, not a spin
+// A two-arm squeeze holds straight until both arms rest. The deadline never
+// moves when an arm drops out or comes back during the same squeeze.
+export class StraightHold {
+  constructor() {
+    this.deadline = null;
+    this.needsRest = false;
+  }
+  update(flex, now, live, confirmedRest = true) {
+    const [left, right] = flex;
+    if (!live) {
+      this.deadline = null;
+      this.needsRest = true;
+      return [false, false];
+    }
+    if (!left && !right) {
+      if (this.needsRest && !confirmedRest) return [false, false];
+      this.deadline = null;
+      this.needsRest = false;
+      return flex;
+    }
+    if (this.deadline !== null && now >= this.deadline) this.needsRest = true;
+    if (this.needsRest) return [false, false];
+    if (left && right && this.deadline === null) this.deadline = now + 8000;
+    return this.deadline === null ? flex : [true, true];
+  }
+}
+
 export const CHORD_WIN = 0.25; // seconds
 
 // Nobody starts or stops both arms at exactly the same moment. One arm on its own only counts
