@@ -6,7 +6,7 @@ import {
   unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
   unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
-import { buildArmLesson, ArmRun, armRaceControl, wheelMix, CAR_TUNE, arcMotion, armsFor, LEFT_ARM_STEER } from './arms.js';
+import { buildArmLesson, ArmRun, armRaceControl, wheelMix, CAR_TUNE, REAL_CAR, arcMotion, armsFor, LEFT_ARM_STEER } from './arms.js';
 import { mc, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
@@ -1942,7 +1942,7 @@ function renderMc() {
   const t = S.tune;
   $('mc-follow').checked = t.follow;
   $('mc-speed').value = Math.round(t.speed * 100);
-  $('mc-speed-v').textContent = `${Math.round(t.speed * 100)}% power · up to ${Math.round(t.speed * 200)} cm/s`;
+  $('mc-speed-v').textContent = `${Math.round(t.speed * 100)}% power · up to ${Math.round(t.speed * REAL_CAR.topCmS)} cm/s`;
   $('mc-turn').value = Math.round(t.turn * 100);
   $('mc-turn-v').textContent = `${Math.round(t.turn * 100)}%`;
   $('mc-chord').value = Math.round(t.chord * 1000);
@@ -2038,7 +2038,7 @@ document.querySelector('.mc-tests').addEventListener('click', (e) => {
   if (b.dataset.test === 'fwd') {
     const w = wheelMix(1, 0, S.tune);
     testWheels(w.l, w.r, 1000);
-    $('mc-test-note').textContent = `Forward 1 s at ${Math.round(w.l * 100)}% power: about ${Math.round(w.l * 200)} cm.`;
+    $('mc-test-note').textContent = `Forward 1 s at ${Math.round(w.l * 100)}% power: about ${Math.round(w.l * REAL_CAR.topCmS)} cm.`;
   } else {
     const a = arcMotion();
     const w = wheelMix(a.speed, b.dataset.test === 'right' ? a.yaw : -a.yaw, S.tune);

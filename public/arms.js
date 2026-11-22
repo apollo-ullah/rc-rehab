@@ -525,10 +525,10 @@ export class ArmChord {
   }
 }
 
-// The real car (measured): 2 m in 1 s at full power, 12.5 cm between the left and right wheels,
+// The real car (measured): 1 m in 1 s at full power, 12.5 cm between the left and right wheels,
 // 9 cm between front and back wheels. A 4-wheel car steered by its sides scrubs its tyres
 // sideways in a turn, so it turns about as if its wheels were 1.4x further apart.
-export const REAL_CAR = { topCmS: 200, trackCm: 12.5, wheelbaseCm: 9, skid: 1.4 };
+export const REAL_CAR = { topCmS: 100, trackCm: 12.5, wheelbaseCm: 9, skid: 1.4 };
 const effTrack = (c = REAL_CAR) => c.trackCm * c.skid;
 // Turn rate (rad/s, + = right) and forward speed (cm/s) for wheel power l, r (0..1 each).
 export function realMotion(l, r, c = REAL_CAR) {
@@ -538,11 +538,15 @@ export function realMotion(l, r, c = REAL_CAR) {
 // Real-car settings. speed: wheel power when the game car is at full speed (lower = slower real car).
 // turn: 1 = the car geometry above; raise it if the real car turns less than the game, lower it if more.
 export const CAR_TUNE = { follow: true, speed: 0.45, turn: 1, chord: CHORD_WIN, swapWheels: false };
+// Below about 20% power the real car's wheels don't turn at all, so whenever the game car really
+// moves, no wheel gets less than this.
+export const MIN_WHEEL = 0.4;
 
 // The game car's real movement -> power for the left and right wheels (0..1 each).
 // speed: forward speed as a share of the game's top speed. yaw: turn rate in rad/s, + = right.
 // The real car turns as fast as the game car and drives a smaller copy of its path. It mirrors
-// what the game car actually does, so a game car stuck on a wall stops the real car.
+// what the game car actually does, so a game car stuck on a wall stops the real car. A slow game
+// car still gets MIN_WHEEL on both wheels, so the real car never stalls on a valid move.
 export function wheelMix(speed, yaw, tune = CAR_TUNE, car = REAL_CAR) {
   const s = Math.max(0, Math.min(1.3, speed)) * tune.speed;
   const d = (Math.max(-4, Math.min(4, yaw)) * effTrack(car) * tune.turn) / car.topCmS;
@@ -558,11 +562,16 @@ export function wheelMix(speed, yaw, tune = CAR_TUNE, car = REAL_CAR) {
     r -= l;
     l = 0;
   }
-  // More than full power: keep the turn and take away forward.
+  // Too little power to move: lift both wheels together until the slower one is at MIN_WHEEL.
+  // The difference between them (the turn rate) stays the same; only forward speed goes up.
+  const lift = Math.max(0, MIN_WHEEL - Math.min(l, r));
+  l += lift;
+  r += lift;
+  // More than full power: keep the turn and take away forward (never below MIN_WHEEL).
   const over = Math.max(l, r) - 1;
   if (over > 0) {
-    l = Math.max(0, l - over);
-    r = Math.max(0, r - over);
+    l = Math.max(MIN_WHEEL, l - over);
+    r = Math.max(MIN_WHEEL, r - over);
   }
   return tune.swapWheels ? { l: r, r: l } : { l, r };
 }

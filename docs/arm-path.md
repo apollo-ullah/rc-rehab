@@ -137,8 +137,12 @@ biceps → EMG sensor (e.g. MyoWare, envelope output) → ESP32 → wss://…/ap
 - Both-arms window: one arm alone only counts as a turn after 250 ms alone; both and none count at
   once. So a slightly late second arm still goes straight, and an uneven let-go doesn't swerve.
 - The real car mirrors the game car's actual forward speed and turn rate (after walls), turned into
-  left/right power with the measured car: 200 cm/s at full power, 12.5 cm track, 9 cm wheelbase,
+  left/right power with the measured car: 100 cm/s at full power, 12.5 cm track, 9 cm wheelbase,
   ×1.4 for tyre scrub. Turn rate = (left − right speed) / 17.5 cm, so the game's one-arm curve
-  (97°/s) needs only about 37% vs 22% power: a gentle arc. Lower power is made by pulsing the
+  (97°/s) needs about 70% vs 40% power: a gentle arc. Lower power is made by pulsing the
   buttons (on the board with the new firmware, otherwise from the page).
+- Minimum power: below about 20% the real wheels don't turn, so while the game car is moving no
+  wheel gets less than 40% (`MIN_WHEEL`). Both wheels are lifted by the same amount, so the
+  difference between them, and with it the turn rate, stays the same. A game car that stops or is
+  stuck on a wall still gives 0 / 0.
 - Lessons: between gates the car only moves while the arms give the direction the road needs.

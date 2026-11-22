@@ -17,7 +17,7 @@ import {
   addPractice, weekView, progressLine, addDays, achievements, pathProgress, xpLevel, unitsOf,
 } from '../public/path.js';
 import {
-  buildArmLesson, ArmRun, armRaceControl, ArmChord, wheelMix, realMotion, arcMotion, CAR_TUNE, Pulser, FlexSwitch, armProfile, armDir,
+  buildArmLesson, ArmRun, armRaceControl, ArmChord, wheelMix, realMotion, arcMotion, CAR_TUNE, MIN_WHEEL, Pulser, FlexSwitch, armProfile, armDir,
 } from '../public/arms.js';
 import { LessonCourse } from '../public/course.js';
 import { raceTrack, lessonTrack, selfIntersects, RACE_IDS, LESSON_GATES } from '../public/tracks.js';
@@ -503,7 +503,7 @@ function idealSignals(w, v) {
   check(car.v > 30 && car.vReal < 3 && car.throttleOut < 0.02 && w.l === 0 && w.r === 0,
     `Driving into a wall: game wheels spin (${car.v.toFixed(0)}) but the real car gets no power (moves ${car.vReal.toFixed(1)}, wheels ${w.l}/${w.r})`);
 
-  // The real car turns as fast as the game car (2 m/s at full power, 12.5 cm track, tyre scrub).
+  // The real car turns as fast as the game car (1 m/s at full power, 12.5 cm track, tyre scrub).
   const a = arcMotion();
   const right = wheelMix(a.speed, a.yaw);
   const left = wheelMix(a.speed, -a.yaw);
@@ -513,6 +513,16 @@ function idealSignals(w, v) {
     `Real-car power: one-arm curve = left ${right.l.toFixed(2)} / right ${right.r.toFixed(2)} (gentle arc, ${(m.yaw * 57.3).toFixed(0)}°/s like the game), straight = ${straight.l}`);
   const sw = wheelMix(a.speed, a.yaw, { ...CAR_TUNE, swapWheels: true });
   check(sw.l === right.r && sw.r === right.l, 'Swap the wheels setting swaps left and right power');
+
+  // Slow but real moves: below about 20% power the real wheels don't turn, so no wheel gets less
+  // than MIN_WHEEL while the game car moves. Both wheels lift together, so the turn rate stays.
+  const creep = wheelMix(0.05, 0);
+  const slow = wheelMix(a.speed * 0.2, a.yaw * 0.2);
+  const ms2 = realMotion(slow.l, slow.r);
+  const floor = Math.min(right.l, right.r, left.l, left.r, creep.l, creep.r, slow.l, slow.r);
+  check(floor >= MIN_WHEEL - 1e-9 && Math.abs(creep.l - MIN_WHEEL) < 1e-9 && creep.l === creep.r && slow.l > slow.r
+    && Math.abs(ms2.yaw - a.yaw * 0.2) < 0.01 && wheelMix(0, 0).l === 0 && wheelMix(0, 0).r === 0,
+    `Real-car minimum power: slow moves still get ${MIN_WHEEL * 100}%+ per wheel (creeping ${creep.l.toFixed(2)}/${creep.r.toFixed(2)}, slow curve ${slow.l.toFixed(2)}/${slow.r.toFixed(2)} at the game's turn rate), stopped = 0/0`);
 
   // Old firmware: pulsing on/off gives the same average power.
   const p = new Pulser();
