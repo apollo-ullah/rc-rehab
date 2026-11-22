@@ -14,13 +14,15 @@ import { mountIcons, iconSvg } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOPILOT = new URLSearchParams(location.search).has('autopilot');
-// Two modes, picked on the first screen (/). Arcade (/arcade): one person after another racing the
-// Grand Prix with no help for the shared leaderboard; nothing personal is kept.
 // Practice path (/path): your own roadmap of lessons, saved in this browser.
-const ARCADE = /^\/arcade\/?$/.test(location.pathname) || new URLSearchParams(location.search).has('arcade');
 const PATH = /^\/path\/?$/.test(location.pathname);
 // Arm path (/arms): biceps lessons from two EMG sensors that only say "flexing or not" (docs/arm-path.md).
 const ARMS = /^\/arms\/?$/.test(location.pathname);
+// The team's menu of all three modes (/team) is not linked from anywhere people see.
+const CHOOSER = /^\/team\/?$/.test(location.pathname);
+// Everything else, the front page (/) included, is the Arcade: one person after another racing the
+// Grand Prix with no help for the shared leaderboard; nothing personal is kept.
+const ARCADE = !PATH && !ARMS && !CHOOSER;
 const PATHID = ARMS ? 'arms' : 'head';
 const video = $('cam');
 const tracker = new HeadTracker(video);
@@ -2193,4 +2195,5 @@ document.addEventListener('visibilitychange', () => {
 if (ARCADE) arcadeHome();
 else if (ARMS && new URLSearchParams(location.search).has('demo')) openDemo();
 else if (PATH || ARMS) show('s-name');
+else show('s-choose');
 connect();
