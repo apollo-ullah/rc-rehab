@@ -1,4 +1,4 @@
-# Head Racer
+# RC-Rehab
 
 A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The first screen (`/`) asks which of the three modes you want:
 
@@ -31,7 +31,7 @@ npx vercel deploy --prod                       # prints the app's link
 
 After a code change, run `npx vercel deploy --prod` again. The saved data stays. Connections that were already open stay on the old version until they reconnect (at most 5 minutes), so for a minute or two the old version may still be running the game.
 
-Live: **https://head-racer.vercel.app** (the first screen offers both modes).
+Live: **https://rc-rehab.vercel.app** (the old https://head-racer.vercel.app link still works). The first screen offers every mode.
 
 - **Arcade:** `<link>/arcade` skips the choice (handy on the event laptop). Anyone you share the link with can race; there is one line for the one real car, so racers take turns.
 - **Practice path:** `<link>/path` skips the choice.
@@ -132,11 +132,13 @@ Biceps exercises for when the only input is two yes/no signals: **is the left bi
 | 1 Wake up | Squeeze · Let go · Hold · Quick · Mix | **Flex Sprint**: squeeze either arm to drive |
 | 2 Hold strong | Long hold · Hold, then let go · Both arms hold · Stay loose · Mix | **Long Haul**: moves while you hold; a boost every 3 s held |
 | 3 Curls | Up and down · Pause at the top · Both arms · Fast up · Mix | **Pump Track**: rolls by itself; every new squeeze boosts |
-| 4 Left and right | Just one · Switch · Together · Which arm? · Mix | **Arm Grand Prix**: left arm turns left, right turns right, both = full speed |
+| 4 Left and right | Just one · Switch · Together · Which arm? · Mix | **Arm Grand Prix** on Pine Speedway (long straights): left arm turns right, right arm turns left (each arm drives its own side's wheels), both = full speed |
 
 - Relaxing on cue counts as much as squeezing (in CP the biceps are often over-active), and nothing ever asks you to squeeze harder: the sensors can't tell.
 - Difficulty adapts per lesson like the head path (longer holds, shorter reaction windows, less help from the other arm).
 - **Sensor check** after your name: both arms light up live; squeeze left, squeeze right, relax. "Swap left and right" fixes crossed wires. The menu has it too.
+- **Real car over Bluetooth (MuscleCar):** on **Sensors and car**, press **Connect MuscleCar** (Chrome or Edge, on the Vercel link or `localhost`), then calibrate: relax both arms, squeeze left, squeeze right (2 s each). The real car then follows the game car in lessons and races. It copies what the game car *actually* does, so a game car pushing into a wall stops the real car too. **Speed** sets the real car's power at the game's top speed. **Turning** (100% = the car's measured geometry: 1 m/s at full power, 12.5 cm track, 9 cm wheelbase) and the **Quarter turn** tests make it turn as much as the game. A one-arm turn is a gentle arc (about 70% / 40% power), not a spin. While the game car is moving, no wheel gets less than 40% power (below about 20% the wheels don't turn), so slow moves still move the real car; both wheels are lifted together, so turns keep their turn rate. **Both-arms window** (250 ms): one arm starting or letting go up to this long before the other still counts as straight on.
+- **Lessons with the real car:** between gates the car only moves while your arms give the direction the road needs (both = straight, left arm = right, right arm = left). The wrong arm or none, and both cars wait.
 - **No sensor?** Hold **A** / **D** (or ← / →), or press and hold the on-screen Left / Right lights. `/arms?autopilot` plays lessons and races by itself while the sensor is offline.
 - **Hardware:** two EMG sensors (e.g. MyoWare 2.0, ENV output) on GPIO 34 and 35 of an ESP32 running `firmware/emg_arms/emg_arms.ino`. At power-up keep both arms relaxed for 3 s while it calibrates; type `l` or `r` in the Serial Monitor to set a gentler threshold from a comfortable squeeze. It sends `f <left> <right>` on every change and every 0.5 s; 2 s of silence = offline, so lessons pause and the car waits. The car's own ESP32 may send the same lines instead.
 - One sensor rig per game: everyone in the Arm path sees the same arms, which is fine for a demo.
@@ -181,7 +183,10 @@ A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in it
 
 ## Two-bicep car demo and game replay
 
-Flash the ESP32-S3 with [MuscleCar](firmware/MuscleCar/MuscleCar.ino).
+Flash the ESP32-S3 with [MuscleCar](firmware/MuscleCar/MuscleCar.ino). The same board drives the
+real car from the game's Arm path over Bluetooth (see [Arm path](#arm-path)): the game writes power
+for each side (characteristic `…0c54`, two bytes) and the board pulses the buttons to run slower than
+full speed. Free Flex's one-byte on/off command still works.
 Left and right MyoWare ENV use GPIO2 and GPIO8 respectively. Run
 `python3 arm-lab/serve.py` and open [Free Flex](http://127.0.0.1:8741/blind.html)
 in a Web Bluetooth capable browser. Connect both biceps, capture rest and flex

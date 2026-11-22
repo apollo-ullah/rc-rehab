@@ -39,6 +39,7 @@ export function newCar(track = GP) {
     air: false, airTime: 0, boost: 0, steer: 0,
     seg: track.segAt(track.startAt), progress: track.startAt, stars: [], hit: false, finished: false,
     steerOut: 0, throttleOut: 0,
+    vReal: 0, yawRate: 0, // how fast it really moves forward and turns, after walls
   };
   // Not enumerable, so spreading or sending a car never copies the whole course.
   Object.defineProperty(car, 'track', { value: track, writable: true, enumerable: false });
@@ -71,6 +72,9 @@ export function step(car, steer, go, dt, assistLevel = 0, track = car.track || G
   const cfg = ASSIST[assistLevel] || ASSIST[0];
   const ev = { newHit: false, star: -1, launch: false, land: false, boost: false };
   const before = car.progress;
+  const x0 = car.x;
+  const y0 = car.y;
+  const h0 = car.h;
 
   let thr = cfg.autoGo ? Math.max(go, cfg.autoGo) : go;
   let st = steer;
@@ -156,8 +160,17 @@ export function step(car, steer, go, dt, assistLevel = 0, track = car.track || G
 
   if (car.progress >= track.finishAt) car.finished = true;
 
+  // What the car really did this step. Pushing into a wall keeps the wheels spinning (car.v)
+  // but the car doesn't move, so the real car must stop too.
+  if (dt > 0) {
+    const fwd = ((car.x - x0) * Math.cos(car.h) + (car.y - y0) * Math.sin(car.h)) / dt;
+    const k = Math.min(1, dt * 12);
+    car.vReal += (Math.max(0, fwd) - car.vReal) * k;
+    car.yawRate += (wrap(car.h - h0) / dt - car.yawRate) * k;
+  }
+
   // What the real car gets: the virtual car's actual speed and steering.
-  car.steerOut = car.v > 5 ? car.steer : 0;
-  car.throttleOut = clamp(car.v / MAX_SPEED, 0, 1);
+  car.steerOut = car.vReal > 5 ? car.steer : 0;
+  car.throttleOut = clamp(car.vReal / MAX_SPEED, 0, 1);
   return ev;
 }

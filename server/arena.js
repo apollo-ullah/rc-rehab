@@ -1,4 +1,4 @@
-// Head Racer game core: the driver queue, races, leaderboards and the practice log.
+// RC-Rehab game core: the driver queue, races, leaderboards and the practice log.
 // It has no host-specific code in it, so the same logic runs on a laptop (server.js, JSON files)
 // and in the cloud (server/relay.js on Vercel, Redis).
 import { STAR_BONUS_MS, RUN_TIMEOUT_MS, ASSIST } from '../public/game.js';

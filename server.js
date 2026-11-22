@@ -1,4 +1,4 @@
-// Head Racer on a laptop: `npm start`. Serves the pages, saves to JSON files in data/,
+// RC-Rehab on a laptop: `npm start`. Serves the pages, saves to JSON files in data/,
 // and opens a cloudflared quick tunnel so phones get an HTTPS link.
 // The game logic itself lives in server/arena.js (shared with the cloud version, server/relay.js).
 import express from 'express';

@@ -1,4 +1,4 @@
-import { newCar, step, autoSteer, realSteer, STAR_BONUS_MS, ASSIST } from './game.js';
+import { newCar, step, autoSteer, realSteer, STAR_BONUS_MS, ASSIST, MAX_SPEED } from './game.js';
 import { HeadTracker, buildCalibration, toIntent, toSignals, rangeFrom, rangeFromCalibration } from './head.js';
 import {
   UNITS, KINDS, GRAND_PRIX, XP, FACE_SIGS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode,
@@ -6,7 +6,8 @@ import {
   unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
   unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
-import { buildArmLesson, ArmRun, armRaceControl } from './arms.js';
+import { buildArmLesson, ArmRun, armRaceControl, wheelMix, CAR_TUNE, REAL_CAR, arcMotion, armsFor, armDir, ArmChord, LEFT_ARM_STEER } from './arms.js';
+import { mc, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
 import { mountIcons, iconSvg } from './icons.js';
@@ -36,6 +37,13 @@ const store = {
 };
 
 // ---------- App state ----------
+function loadTune() {
+  try {
+    return { ...CAR_TUNE, ...JSON.parse(localStorage.getItem('rc-car-tune') || '{}') };
+  } catch {
+    return { ...CAR_TUNE };
+  }
+}
 const S = {
   name: store.get('rc-name') || '',
   assist: 0,
@@ -47,6 +55,7 @@ const S = {
   armBtn: { l: false, r: false },
   armCheck: null,
   armRace: {},
+  tune: loadTune(), // the real car over Bluetooth: speed, turning, both-arms window
   cal: null,
   profile: null,
   level: 'gp', // which race: 'gp' or a unit id for that unit's boss race
@@ -123,6 +132,7 @@ import('./world3d.js')
 const CAM_SLOTS = { 's-camera': 'cam-slot-camera', 's-cal': 'cam-slot-cal', 's-wait': 'cam-slot-wait', 's-race': 'cam-slot-race', 's-lesson': 'cam-slot-lesson' };
 function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
+  document.body.classList.toggle('demo-on', id === 's-demo');
   const slot = CAM_SLOTS[id];
   if (slot && S.mode === 'head') {
     $(slot).prepend(video);
@@ -712,7 +722,7 @@ function raceControls(level) {
     case 'a1': return ['By itself', 'Squeeze either arm'];
     case 'a2': return ['By itself', 'Hold a squeeze'];
     case 'a3': return ['By itself', 'Rolls; squeeze to boost'];
-    case 'a4': return ['Left or right arm', 'Both arms: full speed'];
+    case 'a4': return ['Left arm turns right, right arm turns left', 'Both arms: full speed'];
     default: return [you, head ? capital(S.cal?.goLabel || 'your GO move') : 'Hold your finger down'];
   }
 }
@@ -780,7 +790,7 @@ function openStop(ui, li) {
   $('st-course').innerHTML = `${iconSvg('map')}<span>${esc(t.name)}</span>`;
   $('st-svg').innerHTML = courseSvg(t);
   $('st-course-facts').innerHTML = (li >= 0 && li < 5
-    ? [['gate', `${LESSON_GATES} gates`, 'one rep at each'], ['flag', 'Ends at the finish', `${jumps.toLowerCase()} on the way`], ['clock', 'About 2 minutes', 'the drive is your rest']]
+    ? [['gate', `${LESSON_GATES} gates`, 'one rep at each'], ['flag', 'Ends at the finish', `${jumps.toLowerCase()} on the way`], ['clock', 'About 2 minutes', ARMS ? 'steer with your arms between gates' : 'the drive is your rest']]
     : [['star', `${t.stars.length} stars`, `each takes ${STAR_BONUS_MS / 1000} s off`], ['up', jumps, 'with boost pads'], ['car', 'Real RC car', 'or play on this phone']]
   ).map(([ic, b, s]) => `<div>${iconSvg(ic)}<span><b>${esc(b)}</b><small>${esc(s)}</small></span></div>`).join('');
   $('st-facts').innerHTML = facts.map(([a, b]) => `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
@@ -803,6 +813,11 @@ function renderStopActions() {
   const { ui, li } = S.stop;
   if (ui >= 0 && li < 5) {
     $('st-actions').innerHTML = '<button class="btn unit big" id="btn-st-start"><span data-icon="play">Start lesson</span></button>';
+  } else if (ARMS && mc.connected) {
+    // The MuscleCar is right here over Bluetooth: no line, the car follows this race.
+    const on = S.tune.follow;
+    $('st-actions').innerHTML = `<p class="car-status"><span class="lamp${on ? ' on' : ''}"></span>${on ? 'MuscleCar connected: the real car follows this race' : 'MuscleCar connected. Following is off (Sensors and car).'}</p>`
+      + '<button class="btn unit big" id="btn-st-phone"><span data-icon="play">Start race</span></button>';
   } else {
     const real = (c) => `<button class="btn ${c}" id="btn-st-real"><span data-icon="car">Drive the real car</span></button>`;
     const phone = (c) => `<button class="btn ${c}" id="btn-st-phone"><span data-icon="phone">Play on this phone</span></button>`;
@@ -836,13 +851,13 @@ function startLesson(ui, li) {
 }
 // Arm lessons: no camera. The sensor check comes first unless it's done or keys/touch are in use.
 function startArmLesson(ui, li) {
-  if (!S.armCheck?.done && !S.armManual && !S.emg.online) return openArmCheck(() => startArmLesson(ui, li));
+  if (!S.armCheck?.done && !S.armManual && !armOnline()) return openArmCheck(() => startArmLesson(ui, li));
   const lesson = buildArmLesson(S.profile, ui, li);
-  runLesson(ui, li, lesson, new ArmRun(lesson));
+  runLesson(ui, li, lesson, new ArmRun(lesson), { armSteer: { win: S.tune.chord } });
 }
-function runLesson(ui, li, lesson, run) {
+function runLesson(ui, li, lesson, run, opts = {}) {
   const track = lessonTrack(ui, li);
-  const course = new LessonCourse(track, run);
+  const course = new LessonCourse(track, run, opts);
   S.lesson = {
     ui, li, lesson, run, track, course,
     activeMs: 0,
@@ -889,7 +904,7 @@ $('btn-l-quit').onclick = () => finishLesson(true);
 
 // ?autopilot: a stand-in player for demos without a face. It only plays while nobody else is:
 // a calibrated face in view, a finger on the screen or a key held takes over straight away.
-const playerActive = () => (S.mode === 'head' && !!S.cal && tracker.faceVisible) || (S.mode === 'arms' && S.emg.online) || S.armBtn.l || S.armBtn.r || S.touch.active || S.keys.size > 0;
+const playerActive = () => (S.mode === 'head' && !!S.cal && tracker.faceVisible) || (S.mode === 'arms' && armOnline()) || S.armBtn.l || S.armBtn.r || S.touch.active || S.keys.size > 0;
 const autopilotNow = () => AUTOPILOT && !playerActive();
 let autopilotTold = false;
 function tellAutopilot() {
@@ -900,7 +915,7 @@ function tellAutopilot() {
 }
 const bot = { v: 0 };
 function botSignals(run, dt) {
-  if (S.mode === 'arms') return { ...run.want(), face: true };
+  if (S.mode === 'arms') return { ...(S.lesson?.course.botArms() || run.want()), face: true };
   const w = run.want();
   bot.v += (w.value - bot.v) * Math.min(1, dt * 5);
   const s = { side: 0, still: 0, pitch: 0, jaw: 0, pucker: 0, smile: 0, raw: { side: 0, jaw: 0, pucker: 0, smile: 0 }, axis: 'yaw', face: true };
@@ -1170,7 +1185,11 @@ function bossControl(level, it, sig, car, dt) {
 function bossPreview(level, it, sig) {
   if (level === 'gp') return it;
   if (!sig.face) return { steer: 0, go: 0 };
-  if (level.startsWith('a')) return { steer: level === 'a4' ? (sig.l && !sig.r ? -1 : sig.r && !sig.l ? 1 : 0) : 0, go: sig.l || sig.r ? 1 : 0 };
+  if (level === 'a4') {
+    const c = S.armRace.cmd || { l: sig.l, r: sig.r };
+    return { steer: c.l === c.r ? 0 : c.l ? LEFT_ARM_STEER : -LEFT_ARM_STEER, go: c.l || c.r ? 1 : 0 };
+  }
+  if (level.startsWith('a')) return { steer: 0, go: sig.l || sig.r ? 1 : 0 };
   return {
     u1: { steer: 0, go: clamp((0.5 - sig.still) / 0.3, 0, 1) },
     u2: { steer: it.steer, go: 0.6 },
@@ -1184,7 +1203,7 @@ const raceTitle = (level) => (level === 'gp' ? GRAND_PRIX.name : `Boss race · $
 function howTo() {
   if (S.level !== 'gp') {
     const u = UNITS[unitIndex(S.level)];
-    if (S.mode === 'arms') return esc(u.boss.how) + (S.armManual || !S.emg.online ? ' No sensor? Hold A and D, or the Left and Right buttons.' : '');
+    if (S.mode === 'arms') return esc(u.boss.how) + (S.armManual || !armOnline() ? ' No sensor? Hold A and D, or the Left and Right buttons.' : '');
     return esc(u.boss.how) + (S.mode === 'touch' ? ' On touch: slide to steer, drag up for face moves.' : '');
   }
   if (S.mode === 'touch') return 'Hold a finger on the screen to go. Slide it left or right to steer.';
@@ -1235,7 +1254,7 @@ function startCountdownView() {
   S.phase = 'countdown';
   S.car = newCar(S.track);
   S.stats = { headMoves: 0, goMoves: 0, goHoldMs: 0, wallHits: 0, jumps: 0, puckers: 0, squeezes: 0, onMs: 0, steerUp: false, goUp: false };
-  S.armRace = {};
+  S.armRace = { win: S.tune.chord };
   S.puckerUp = false;
   S.lastBoost = 0;
   scene(S.track, 'chase', 0);
@@ -1245,7 +1264,7 @@ function startCountdownView() {
   show('s-race');
   $('hud-time').textContent = '0.0';
   $('hud-stars').textContent = `0/${S.track.stars.length}`;
-  $('hud-name').textContent = `${S.level === 'gp' ? S.track.name : levelName(S.level)}${S.local ? ' · phone' : ''}${AUTOPILOT ? ' · autopilot' : ''}`;
+  $('hud-name').textContent = `${S.level === 'gp' ? S.track.name : levelName(S.level)}${S.local ? (bleDriving() ? ' · real car' : ' · phone') : ''}${AUTOPILOT ? ' · autopilot' : ''}`;
   tellAutopilot();
   $('r-go-label').textContent = S.level === 'gp' ? 'Go' : GO_LABEL[S.level];
   $('r-steer-wrap').classList.toggle('hidden', !['gp', 'u2', 'a4'].includes(S.level)); // the other races steer themselves
@@ -1680,7 +1699,7 @@ $('a-name').addEventListener('keydown', (e) => e.key === 'Enter' && $('btn-a-pla
 if (ARCADE) {
   $('btn-res-path').innerHTML = '<span data-icon="people">Next player</span>';
   mountIcons($('btn-res-path'));
-  document.title = 'Head Racer Arcade';
+  document.title = 'RC-Rehab Arcade';
 }
 
 // ---------- Menu: progress, achievements, settings, about ----------
@@ -1761,7 +1780,7 @@ function renderMenu() {
     : S.mode === 'head'
     ? S.cal ? `You use the camera. You ${S.cal.steerLabel} to steer and ${S.cal.goLabel} to go.` : 'You use the camera. Head setup is not done yet.'
     : 'You use touch. Slide sideways for left and right, and drag up for face moves.';
-  $('btn-m-controls').innerHTML = S.mode === 'arms' ? '<span data-icon="arm">Sensor check</span>' : `<span data-icon="${S.mode === 'head' ? 'hand' : 'camera'}">${S.mode === 'head' ? 'Use touch instead' : 'Use the camera'}</span>`;
+  $('btn-m-controls').innerHTML = S.mode === 'arms' ? '<span data-icon="arm">Sensors and car</span>' : `<span data-icon="${S.mode === 'head' ? 'hand' : 'camera'}">${S.mode === 'head' ? 'Use touch instead' : 'Use the camera'}</span>`;
   $('btn-m-recal').classList.toggle('hidden', S.mode !== 'head');
   mountIcons($('s-menu'));
 }
@@ -1785,8 +1804,11 @@ $('btn-m-name').onclick = () => {
 // ---------- Arm path: the two biceps sensors, or keys and buttons instead ----------
 // The sensors only say "flexing or not" for each arm. A and D (or ← and →) and the on-screen
 // Left/Right lights work too, for testing or when there's no sensor.
+// Sensors: the MuscleCar board over Bluetooth first, else a WiFi sensor board through the server.
+const armOnline = () => mc.ready || S.emg.online;
 function readArms() {
-  const e = S.emg;
+  const ble = mc.ready;
+  const e = ble ? { l: mc.flex[0], r: mc.flex[1], online: true } : S.emg;
   const k = S.keys;
   const kl = k.has('a') || k.has('A') || k.has('ArrowLeft') || S.armBtn.l;
   const kr = k.has('d') || k.has('D') || k.has('ArrowRight') || S.armBtn.r;
@@ -1837,10 +1859,13 @@ function openArmCheck(next = goHome) {
   world?.reset();
 }
 function renderArmStatus() {
-  S.armCheck.online = S.emg.online;
-  $('ac-status').innerHTML = S.emg.online
-    ? '<span class="lamp on"></span>Arm sensor connected'
-    : '<span class="lamp"></span>Waiting for the arm sensor. Turn it on, or use the keys or buttons.';
+  S.armCheck.online = armOnline();
+  $('ac-status').innerHTML = armOnline()
+    ? `<span class="lamp on"></span>Arm sensors working${mc.ready ? ' (Bluetooth)' : ' (WiFi)'}`
+    : mc.connected && !mc.calibrated
+    ? '<span class="lamp"></span>Calibrate the sensors to use them.'
+    : '<span class="lamp"></span>Waiting for the arm sensors. Connect MuscleCar, or use the keys or buttons.';
+  renderMc();
 }
 function renderArmCheck() {
   const c = S.armCheck;
@@ -1851,7 +1876,8 @@ function renderArmCheck() {
 }
 function armCheckFrame(sig, dt) {
   const c = S.armCheck;
-  if (c.online !== S.emg.online) renderArmStatus();
+  if (c.online !== armOnline()) renderArmStatus();
+  liveMc();
   const st = ARM_STEPS[c.step];
   if (st && st.ok(sig)) {
     c.t += dt * 1000;
@@ -1883,8 +1909,217 @@ $('ac-swap').onchange = (e) => {
   S.armSwap = e.target.checked;
   store.set('rc-arm-swap', S.armSwap ? '1' : '0');
 };
+// ---------- The real car over Bluetooth (MuscleCar) ----------
+// The real car copies what the game car actually does: how fast it really moves and how fast it
+// turns (after walls), turned into power for the left and right wheels (arms.js wheelMix).
+const bleDriving = () => ARMS && mc.connected && S.tune.follow && S.local;
+function mirrorRealCar() {
+  if (S.phase === 'demo') return setWheels(S.demo.w.l, S.demo.w.r);
+  let car = null;
+  if (ARMS && S.tune.follow) {
+    if (S.phase === 'racing' && S.local) car = S.car;
+    else if (S.phase === 'lesson' && S.lesson && !S.lesson.finishing) car = S.lesson.course.car;
+  }
+  const w = car ? wheelMix(car.vReal / MAX_SPEED, car.yawRate, S.tune) : { l: 0, r: 0 };
+  setWheels(w.l, w.r);
+}
+const saveTune = () => store.set('rc-car-tune', JSON.stringify(S.tune));
+const mcHelp = (text) => ($('mc-help').textContent = text);
+let mcBusy = false;
+let mcLiveAt = 0;
+function mcStatusHtml() {
+  if (!mc.supported) return '<span class="lamp"></span>No Bluetooth in this browser. Use Chrome or Edge.';
+  if (!mc.connected) return '<span class="lamp"></span>MuscleCar not connected';
+  if (!mc.online) return '<span class="lamp"></span>MuscleCar connected, waiting for readings…';
+  return `<span class="lamp on"></span>${esc(mc.name)} · left ${mc.adc[0]} · right ${mc.adc[1]}${mc.calibrated ? '' : ' · not calibrated'}`;
+}
+function renderMc() {
+  $('mc-status').innerHTML = mcStatusHtml();
+  $('btn-mc-connect').innerHTML = `<span data-icon="arm">${mc.connected ? 'Disconnect' : 'Connect MuscleCar'}</span>`;
+  $('btn-mc-connect').disabled = !mc.supported || mcBusy;
+  $('btn-mc-cal').classList.toggle('hidden', !mc.connected);
+  $('btn-mc-cal').disabled = mcBusy;
+  $('btn-mc-cal').innerHTML = `<span>${mc.calibrated ? 'Calibrate again' : 'Calibrate'}</span>`;
+  $('mc-car').classList.toggle('hidden', !mc.connected);
+  const t = S.tune;
+  $('mc-follow').checked = t.follow;
+  $('mc-speed').value = Math.round(t.speed * 100);
+  $('mc-speed-v').textContent = `${Math.round(t.speed * 100)}% power · up to ${Math.round(t.speed * REAL_CAR.topCmS)} cm/s`;
+  $('mc-turn').value = Math.round(t.turn * 100);
+  $('mc-turn-v').textContent = `${Math.round(t.turn * 100)}%`;
+  $('mc-chord').value = Math.round(t.chord * 1000);
+  $('mc-chord-v').textContent = `${Math.round(t.chord * 1000)} ms`;
+  $('mc-swapw').checked = t.swapWheels;
+  $('mc-fw').textContent = mc.pwm
+    ? 'This board pulses the wheel buttons itself, for smooth slow speeds.'
+    : 'This board can only press or release each wheel button, so the page pulses them over Bluetooth. Flash the latest firmware/MuscleCar for smoother slow speeds.';
+  mountIcons($('btn-mc-connect'));
+}
+// Live readings on the sensor screen, a few times a second.
+function liveMc() {
+  const now = performance.now();
+  if (now - mcLiveAt < 200) return;
+  mcLiveAt = now;
+  $('mc-status').innerHTML = mcStatusHtml();
+}
+onMc(() => {
+  if (!mc.connected) toast('MuscleCar disconnected', { icon: 'arm' });
+  if (S.phase === 'armcheck') renderArmStatus();
+  if ($('s-stop').classList.contains('active') && S.stop) renderStopActions();
+});
+$('btn-mc-connect').onclick = async () => {
+  if (mc.connected) return mcDisconnect();
+  mcBusy = true;
+  renderMc();
+  try {
+    await mcConnect();
+    toast('MuscleCar connected', { icon: 'arm' });
+    $('mc-car').open = true;
+    mcHelp(mc.calibrated ? 'Using your last calibration. Calibrate again if the pads moved.' : 'Next: calibrate, so it knows your relaxed and squeezing levels.');
+  } catch (e) {
+    mcHelp(e.name === 'NotFoundError' ? 'No board chosen. Turn MuscleCar on and try again.' : e.message);
+  }
+  mcBusy = false;
+  if (S.armCheck) renderArmStatus();
+  if (mc.connected && !mc.calibrated) runMcCalibration();
+};
+// Relax both (2 s), squeeze left (2 s), squeeze right (2 s). Thresholds sit between the levels.
+async function runMcCalibration() {
+  if (mcBusy || !mc.connected) return;
+  mcBusy = true;
+  for (let i = 0; i < 30 && !mc.online; i++) await wait(100); // just connected: first readings
+  renderMc();
+  const steps = ['Relax both arms', 'Squeeze your LEFT arm and keep squeezing', 'Squeeze your RIGHT arm and keep squeezing'];
+  const got = [];
+  try {
+    for (const text of steps) {
+      mcHelp(`${text}…`);
+      await wait(1000);
+      got.push(await mcRecord(2000));
+    }
+    const [rest, left, right] = got;
+    const bad = S.armSwap ? mcCalibrate(rest, right, left) : mcCalibrate(rest, left, right);
+    if (bad) {
+      const side = (k) => (S.armSwap ? { left: 'right', right: 'left' }[k] : k);
+      mcHelp(`Not saved. ${Object.entries(bad).filter(([, v]) => v).map(([k, v]) => `${capital(side(k))} arm: ${v}.`).join(' ')} Check the pads and calibrate again.`);
+    } else {
+      mcHelp('Calibrated. Check each arm lights up below.');
+      toast('Sensors calibrated', { icon: 'check' });
+      if (S.armCheck) Object.assign(S.armCheck, { step: 0, t: 0, done: false });
+    }
+  } catch (e) {
+    mcHelp(e.message);
+  }
+  mcBusy = false;
+  if (S.armCheck) {
+    renderArmStatus();
+    renderArmCheck();
+  }
+}
+$('btn-mc-cal').onclick = runMcCalibration;
+$('mc-follow').onchange = (e) => {
+  S.tune.follow = e.target.checked;
+  saveTune();
+};
+$('mc-swapw').onchange = (e) => {
+  S.tune.swapWheels = e.target.checked;
+  saveTune();
+};
+for (const [id, key, k] of [['mc-speed', 'speed', 100], ['mc-turn', 'turn', 100], ['mc-chord', 'chord', 1000]]) {
+  $(id).oninput = (e) => {
+    S.tune[key] = Number(e.target.value) / k;
+    saveTune();
+    renderMc();
+  };
+}
+// Test drives with the same numbers the game uses: full speed straight for 1 s, or the game's
+// one-arm curve for as long as the game car takes to turn 90°.
+document.querySelector('.mc-tests').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-test]');
+  if (!b || !mc.connected) return;
+  if (b.dataset.test === 'fwd') {
+    const w = wheelMix(1, 0, S.tune);
+    testWheels(w.l, w.r, 1000);
+    $('mc-test-note').textContent = `Forward 1 s at ${Math.round(w.l * 100)}% power: about ${Math.round(w.l * REAL_CAR.topCmS)} cm.`;
+  } else {
+    const a = arcMotion();
+    const w = wheelMix(a.speed, b.dataset.test === 'right' ? a.yaw : -a.yaw, S.tune);
+    const ms = (Math.PI / 2 / a.yaw) * 1000;
+    testWheels(w.l, w.r, ms);
+    $('mc-test-note').textContent = `Left wheels ${Math.round(w.l * 100)}%, right ${Math.round(w.r * 100)}% for ${(ms / 1000).toFixed(1)} s: it should turn about 90°. More? Lower Turning. Less? Raise it.`;
+  }
+});
+
+// ---------- Demo mode: no game, the arms drive the real car directly ----------
+// Same mapping, both-arms window, speed and gentle turns as the game: both arms = forward,
+// left arm = turn right, right arm = turn left, relaxed = stop.
+const DEMO_DIR = { fwd: 'Forward', right: 'Turning right', left: 'Turning left', none: 'Stopped' };
+let demoTextAt = 0;
+function openDemo() {
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  S.phase = 'demo';
+  S.demo = { chord: new ArmChord(S.tune.chord), dir: '', w: { l: 0, r: 0 } };
+  show('s-demo');
+  demoText();
+}
+function leaveDemo() {
+  S.demo = null;
+  if (S.profile) return goHome();
+  S.phase = 'setup';
+  show('s-name');
+}
+function demoFrame(sig, dt) {
+  const d = S.demo;
+  const dir = armDir(d.chord.update(sig.face && sig.l, sig.face && sig.r, dt));
+  const a = arcMotion();
+  d.w = dir === 'fwd' ? wheelMix(1, 0, S.tune)
+    : dir === 'right' ? wheelMix(a.speed, a.yaw, S.tune)
+    : dir === 'left' ? wheelMix(a.speed, -a.yaw, S.tune)
+    : { l: 0, r: 0 };
+  if (dir !== d.dir) {
+    d.dir = dir;
+    $('dm-dir').textContent = DEMO_DIR[dir];
+    $('dm-dir').classList.toggle('go', dir !== 'none');
+  }
+  armLights('dm-arms', sig);
+  if (performance.now() - demoTextAt > 200) demoText();
+}
+function demoText() {
+  demoTextAt = performance.now();
+  const w = S.demo?.w || { l: 0, r: 0 };
+  $('dm-status').innerHTML = !mc.connected
+    ? `<span class="lamp"></span>MuscleCar not connected${S.emg.online ? ' · WiFi arm sensors working' : ''}`
+    : !mc.online ? '<span class="lamp"></span>MuscleCar connected, waiting for readings…'
+    : !mc.calibrated ? '<span class="lamp"></span>MuscleCar connected · calibrate it in the settings'
+    : `<span class="lamp on"></span>MuscleCar · left ${mc.adc[0]} · right ${mc.adc[1]}`;
+  $('dm-power').textContent = mc.connected
+    ? `Left wheels ${Math.round(w.l * 100)}% · right wheels ${Math.round(w.r * 100)}%`
+    : 'No car connected: nothing is sent';
+  $('btn-dm-connect').classList.toggle('hidden', mc.connected || !mc.supported);
+}
+$('btn-dm-exit').onclick = leaveDemo;
+$('btn-dm-setup').onclick = () => openArmCheck(openDemo);
+$('btn-dm-connect').onclick = async () => {
+  try {
+    await mcConnect();
+    toast('MuscleCar connected', { icon: 'arm' });
+  } catch (e) {
+    if (e.name !== 'NotFoundError') toast(e.message, { icon: 'info' });
+  }
+  demoText();
+  if (mc.connected && !mc.calibrated) {
+    openArmCheck(openDemo);
+    runMcCalibration();
+  }
+};
+$('btn-demo').onclick = openDemo;
+$('btn-name-demo').onclick = openDemo;
+$('btn-ac-demo').onclick = openDemo;
+
 if (ARMS) {
-  document.title = 'Head Racer · Arm path';
+  for (const id of ['btn-demo', 'btn-name-demo']) $(id).classList.remove('hidden');
+  document.title = 'RC-Rehab · Arm path';
   $('name-hand').textContent = 'arm path';
   $('name-intro').textContent = 'Biceps exercises with two muscle sensors that see whether each arm is flexing. Every lesson is its own little course: open each gate by squeezing or relaxing on cue, then drive on to the finish line.';
 }
@@ -1916,9 +2151,11 @@ function frame(now) {
     if (held >= 1) $('btn-start').onclick();
   }
   if (S.phase === 'armcheck') armCheckFrame(sig, dt);
+  else if (S.phase === 'demo') demoFrame(sig, dt);
   else if (S.phase === 'waiting' && S.mode === 'arms') armLights('w-arms', sig);
   if (inRace) raceFrame(dt, it, sig);
   if (inLesson) lessonFrame(dt, sig);
+  if (mc.connected) mirrorRealCar();
 
   // Menus render the world at ~30 fps to leave room for face tracking.
   worldAcc += dt;
@@ -1954,5 +2191,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 if (ARCADE) arcadeHome();
+else if (ARMS && new URLSearchParams(location.search).has('demo')) openDemo();
 else if (PATH || ARMS) show('s-name');
 connect();

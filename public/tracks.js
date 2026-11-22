@@ -288,8 +288,19 @@ Object.assign(RACES, {
   a1: mirrorOf('u3', { name: 'Sunset Canyon' }),
   a2: mirrorOf('u1', { name: 'Long Lake' }),
   a3: mirrorOf('u4', { name: 'Pump Beach' }),
-  a4: mirrorOf('u2', { name: 'Pine Valley' }),
 });
+// Arm Grand Prix: the real car is fast, so this one is long straights joined by gentle 90° corners
+// (constant radius), built from pieces instead of a smooth curve.
+const straight = (len) => ({ len });
+const corner = (dir, r = 240) => ({ len: (r * Math.PI) / 2, turn: dir * 90 });
+RACES.a4 = {
+  name: 'Pine Speedway', theme: 'forest', color: 'mint', width: 130,
+  pieces: [
+    straight(800), corner(1), straight(700), corner(1), straight(450), corner(-1), straight(500),
+    corner(-1), straight(700), corner(-1), straight(320), corner(1), straight(520),
+  ],
+  ramps: 0, boosts: 3, stars: 10,
+};
 
 // ---------- Lesson courses: one per unit and lesson type ----------
 const UNIT_THEME = [
@@ -397,7 +408,7 @@ export function raceTrack(level = 'gp') {
   const id = RACES[level] ? level : 'gp';
   if (!cache.has(id)) {
     const def = RACES[id];
-    const t = build({ id, ...def }, resample(catmull(def.ctrl)));
+    const t = build({ id, ...def }, resample(def.pieces ? turtle(def.pieces).pts : catmull(def.ctrl)));
     autoFeatures(t, def);
     cache.set(id, t);
   }

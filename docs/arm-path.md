@@ -94,7 +94,7 @@ drive between gates is the rest, a miss still opens the gate, difficulty adapts 
 3. **Together**: squeeze both at the same moment (within 0.8 s → 0.25 s) and hold 1 s.
 4. **Which arm?**: a random arm is named; squeeze that one fast and not the other.
 5. **Mix** (+ review).
-- Boss **Arm Grand Prix**: you steer. Left arm turns left, right arm turns right, both drive straight at full speed, neither slows down. The real car follows.
+- Boss **Arm Grand Prix** on Pine Speedway (long straights, gentle 90° corners, so the fast real car has room): you steer. Left arm turns right, right arm turns left, both drive straight at full speed, neither slows down. The real car follows.
 
 Safety, in the app: a short warm-up rep starts each lesson; the "I'm tired" button ends a
 lesson and still counts; two fatigue signs (slower reactions, more misses, sensor dropping
@@ -126,3 +126,23 @@ biceps → EMG sensor (e.g. MyoWare, envelope output) → ESP32 → wss://…/ap
 - `public/arms.js`: building arm lessons and `ArmRun`, the rep engine for yes/no signals
   (same interface as `LessonRun`, so the lesson courses, HUD and scoring are reused).
 - `server/arena.js`: an `emg` device role; players in the Arm path subscribe to it.
+
+## The real car (MuscleCar over Bluetooth)
+
+- The game page connects to the MuscleCar ESP32-S3 with Web Bluetooth (`public/musclecar.js`),
+  reads both biceps (about 50 readings a second), and decides flexing with thresholds from a
+  6-second calibration (relax, squeeze left, squeeze right), like Free Flex's switch.
+- Mapping (as in Free Flex): each arm drives its own side's wheels. Left arm = turn right, right
+  arm = turn left, both = straight.
+- Both-arms window: one arm alone only counts as a turn after 250 ms alone; both and none count at
+  once. So a slightly late second arm still goes straight, and an uneven let-go doesn't swerve.
+- The real car mirrors the game car's actual forward speed and turn rate (after walls), turned into
+  left/right power with the measured car: 100 cm/s at full power, 12.5 cm track, 9 cm wheelbase,
+  ×1.4 for tyre scrub. Turn rate = (left − right speed) / 17.5 cm, so the game's one-arm curve
+  (97°/s) needs about 70% vs 40% power: a gentle arc. Lower power is made by pulsing the
+  buttons (on the board with the new firmware, otherwise from the page).
+- Minimum power: below about 20% the real wheels don't turn, so while the game car is moving no
+  wheel gets less than 40% (`MIN_WHEEL`). Both wheels are lifted by the same amount, so the
+  difference between them, and with it the turn rate, stays the same. A game car that stops or is
+  stuck on a wall still gives 0 / 0.
+- Lessons: between gates the car only moves while the arms give the direction the road needs.
