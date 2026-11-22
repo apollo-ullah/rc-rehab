@@ -1,10 +1,109 @@
 # RC-Rehab
 
-A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The link people get (`/`) opens the Arcade. The team's menu of all three modes is at `/team`, which nothing links to:
+**Rehab exercises that drive a real RC car.** A Duolingo-style daily practice for people with cerebral palsy, where head, face and biceps exercises steer a race car on screen, and a real RC car on the floor follows it.
 
-- **Arcade** (`/arcade`): type a name, do the quick face setup and race the **Grand Prix** (head steers, a face move drives). Everyone races with **no driving help**, so times compare. The real RC car drives along through an ESP32 when it's connected. Times go on one **shared, saved leaderboard** (fastest and most improved) that anyone with the link sees, live. "Next player" clears everything for the next person, so it works on the event laptop and on anyone's own phone.
-- **Practice path** (`/path`, on anyone's own phone or computer): a **roadmap** of 24 stops: four units (head steady, left and right, jaw, lips) of five lessons and a boss race each, plus the Grand Prix. Every lesson is its own little **course**: the car drives itself to a gate, you do the exercise to open it, and the lesson ends when the car crosses the finish line. Progress is saved **in that browser only**, so coming back on the same phone picks up where you left off. Everything is open from day one; the path only suggests an order.
-- **Arm path** (`/arms`): the same kind of roadmap for the **biceps**, from two EMG muscle sensors on an ESP32 that only report whether each arm is flexing. Four units (wake up, hold strong, curls, left and right) of five lessons and a boss race on the real car. No camera. See [Arm path](#arm-path) below.
+### ▶ Try it: **[rc-rehab.vercel.app](https://rc-rehab.vercel.app)**
+
+No download and no account. It runs in the browser on a phone or a laptop with a webcam.
+
+<p>
+  <img src="docs/screenshots/arcade.jpg" width="24%" alt="Arcade: the Grand Prix island and the leaderboard">
+  <img src="docs/screenshots/practice-path.jpg" width="24%" alt="Practice path home: the next lesson and the weekly goal">
+  <img src="docs/screenshots/lesson.jpg" width="24%" alt="A lesson: the car waits at a gate until the right arm squeezes">
+  <img src="docs/screenshots/race.jpg" width="24%" alt="The Arm Grand Prix with left and right arm lights">
+</p>
+
+## Inspiration
+
+People with cerebral palsy often have exercises to practise at home: hold your head steady, turn it to each side, squeeze and relax an arm. They matter, but doing the same ten reps every day gets boring fast, and it is hard to tell whether you are getting better.
+
+Our main hackathon idea was to let people with CP drive an RC car with their own muscles, using EMG sensors. Then we asked: what if the exercises themselves were the controller? Duolingo turns a few minutes of daily practice into a streak people want to keep, so we did the same for rehab exercises and made every rep move a car. The real car makes it feel like play, not therapy.
+
+## What it does
+
+RC-Rehab has three ways to play, all at the same link:
+
+- **Arcade** (the main link): type a name, do a 10-second face setup, and race the **Grand Prix**. Your **head steers** and a **face move** (open mouth, raised eyebrows, smile, pucker or puffed cheeks, whichever you do best) drives. Everyone races with no help, so times are fair, and they go on one shared, live leaderboard for fastest and most improved.
+- **Practice path** (`/path`): a roadmap of 24 stops for the head and face. Four units (hold steady, left and right, jaw, lips) each have five lessons and a boss race. Every lesson is its own little course: the car drives itself to a gate, and your exercise opens it. Targets are a share of **your own** range and get harder or easier after each lesson.
+- **Arm path** (`/arms`): the same kind of roadmap for the **biceps**, using two EMG sensors that only say whether each arm is flexing. Relaxing on cue counts as much as squeezing, because in CP the biceps are often over-active. In races, the left arm turns right and the right arm turns left (each arm drives its own side's wheels), and both arms together go straight.
+
+In races, **a real RC car follows the game car**. An ESP32 on the car connects to the game, so when the car on screen speeds up, turns or hits a wall, the car on the floor does the same. In the Arm path the car follows lessons too, and the game talks to it straight from the web page over Bluetooth. A **big screen** (`/screen`) shows the race, a QR code to join, the waiting line, the leaderboard and "today's practice".
+
+It also has XP and levels, a gentle **weekly** streak with rest days built in, 13 achievements, an "I'm tired" button that always ends a lesson with credit, and a practice log a therapist can download as a spreadsheet.
+
+## How to try it on the website
+
+1. Open **https://rc-rehab.vercel.app** on a phone, or on a laptop with a webcam.
+2. Type a name and press **Play**. Allow the camera when the browser asks. The video stays on your device and is never uploaded.
+3. Do the quick head setup: relax, steer left, steer right, then show your GO move.
+4. Race the Grand Prix: tilt or turn your head to steer, and hold your GO move to drive. Stars take 2 seconds off your time.
+
+The real car only drives when it is with us, so on the website races run on screen.
+
+| Link | What you get |
+|---|---|
+| [rc-rehab.vercel.app](https://rc-rehab.vercel.app) | Arcade: race the Grand Prix with your head and face |
+| [/path](https://rc-rehab.vercel.app/path) | Practice path: head and face lessons on a roadmap |
+| [/arms](https://rc-rehab.vercel.app/arms) | Arm path: biceps lessons. No sensors? Hold **A** / **D** or the on-screen Left / Right buttons |
+| [/path?autopilot](https://rc-rehab.vercel.app/path?autopilot) | Watch it play itself (also works on `/` and `/arms`) |
+| [/screen](https://rc-rehab.vercel.app/screen) | The big screen: live race, leaderboard and today's practice |
+
+- **No camera, or the camera is slow?** Tap **Use touch controls instead**. Slide sideways to steer and drag up for face moves. On a laptop, the arrow keys or WASD work too.
+- **Bluetooth car (Arm path):** **Connect MuscleCar** needs Chrome or Edge. Safari on iPhone does not support Web Bluetooth.
+- Progress on the Practice and Arm paths is saved in your browser only, so come back on the same device to pick up where you left off.
+
+## How we built it
+
+- **The game** is plain JavaScript and **Three.js**, loaded from a CDN with no build step. Every course is a floating island with paved road, curbs, boost pads, jumps and gates. The 3D car uses simple arcade physics, and the same code runs in the browser and in the tests.
+- **Head and face tracking** uses **MediaPipe Face Landmarker** in the browser. Setup picks head tilt or head turn (whichever the player does more clearly) and the face move that moved most, then scales everything to that person's range.
+- **The arms** use two **MyoWare EMG** sensors on an **ESP32**, which sends `left/right flexing` to the server. The car's **ESP32-S3** takes power for each side over **Web Bluetooth** and pulses the controller buttons for partial speed.
+- **The server** (`server/arena.js`) runs the waiting line, races, leaderboard and practice log. It runs as **Vercel** functions with **Upstash Redis**, which holds the saved data and relays live messages between server instances. It also runs as a plain **Node / Express** server on a laptop.
+- **The original car** has an on/off controller, not joysticks, so its ESP32 presses the buttons for it, pulsing the forward button to copy the game's speed.
+
+## Challenges we ran into
+
+- **On/off buttons, smooth game.** The RC controller only has pressed or not pressed. We pulse the forward button every 120 ms, so 50% speed on screen means pressed half the time. On the tank-style car, wheels don't turn under about 20% power, so while the game car is moving, no wheel gets less than 40%.
+- **Steering that is too twitchy.** In our first test, small head wobbles turned the car hard. We added a dead zone, a gentle curve and a **Gentle / Normal / Sharp** setting.
+- **Live races on a serverless host.** On Vercel, phones, the big screen and the car can each land on a different server instance, and every WebSocket is closed after 5 minutes. We relay messages through Redis, let exactly one instance run the game (with a lock), and save a snapshot so another instance can take over mid-race. Phones and the car reconnect before each turn, so a race is never cut off.
+- **Only "yes or no" from the arm sensors.** You can't measure how hard someone squeezes, so the exercises are about timing instead: squeeze when the light comes on, hold, let go on cue, switch arms.
+- **Keeping it honest.** The research on mouth exercises is weak, so the jaw and lip units are framed as control practice, not as treatment for speech or eating. Nothing ever asks you to squeeze harder.
+- **Safety.** If the car gets no command for 300 ms, the phone disconnects, or anyone hits STOP, every button is released.
+
+## Accomplishments we're proud of
+
+- It works from a link in any modern browser, with no install, no account, and **no video ever leaving the phone**.
+- Every rep moves a car on screen, and races drive a real one on the floor.
+- Two full roadmaps, with every lesson on its own named course, all adapting to each player's own range.
+- Races survive dropped connections, server handovers and even redeploys.
+- **100 automated checks** (`npm test`) drive every lesson and every course to the finish, and run full races with a fake phone and a fake car.
+
+## What we learned
+
+- In cerebral palsy, muscles are often **over-active**, so learning to relax on cue is as important as learning to squeeze.
+- Studies on head-control games for CP are small, so we leaned on motor-learning research, which favours feedback that fades over time and that players choose. The meter hides itself every third rep once a lesson is going well, and players can always hide it.
+- Rest is part of the design: a weekly streak with rest days, an "I'm tired" button that earns credit, and a short breathing break after every lesson.
+- Real-time multiplayer on serverless needs a single leader and a way to hand over cleanly.
+
+## What's next
+
+- Try it with players with CP and their therapists, and tune the targets and EMG thresholds on real sensors.
+- A therapist view for setting goals and seeing progress over weeks (today it is a downloadable spreadsheet).
+- Ghost cars to race your own best run, and co-op modes.
+- More inputs, such as switches and other muscles, so more people can play.
+
+## Built with
+
+`javascript` · `three.js` · `mediapipe` · `node.js` · `express` · `websockets` · `vercel` · `upstash-redis` · `web-bluetooth` · `esp32` · `arduino` · `myoware-emg` · `html5` · `css3`
+
+---
+
+# Technical guide
+
+Everything below is for running, building and wiring it up yourself.
+
+## Architecture
+
+The team's menu of all three modes is at `/team`, which nothing links to. **Demo mode** (`/arms?demo`) skips the game: your arms drive the real car directly.
 
 ```
 Online:  Laptop / phones / big screen --HTTPS--> Vercel (static pages + WebSocket functions) <--wss:// from any WiFi-- ESP32 --> controller buttons
@@ -62,7 +161,7 @@ npm start
 
 The quick-tunnel link changes every time you restart, but the QR code updates by itself. Laptop data is saved in `data/`.
 
-Test without hardware: `npm test` (74 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, full races through the server with a fake phone and a fake car, and races carrying on when the connection blips or the game moves to another server).
+Test without hardware: `npm test` (100 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, full races through the server with a fake phone and a fake car, and races carrying on when the connection blips or the game moves to another server).
 Test without a camera: on the phone, tap "Use touch controls instead". In lessons, slide sideways for left/right and drag up for face moves. On a laptop, the arrow keys / WASD also work.
 Demo without a face: open `<link>/path?autopilot` (or `<link>/?autopilot` for the Arcade) and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
 No real car? In the practice path, boss races and the Grand Prix have **Play on this phone**: the same race without the line or the car. It counts for practice and XP and is marked "(phone)" in the CSV, but stays off the leaderboard. Arcade races always go through the line, so they always count, with or without the car.
@@ -157,7 +256,9 @@ Small head movements give small turns: the first 20% of a movement is ignored, a
 
 ## Look
 
-A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in its own colours: each course is a bevelled island with a glowing rim floating over a pale grid, with rounded trees, paved road, red-and-white curbs, chevron boost pads, gates with lifting arms, 3D course lettering and a rounded coral car. Each unit has a theme (lake, forest, canyon, beach, park). Menus show the next course from above, a stop shows its island, lessons and races use a chase camera, and the big screen shows the course being raced. The interface is framed paper panels and square icon buttons with toasts for achievements. Titles are Amatic SC and everything you read is Nunito. Unit colours are sky, mint, coral and sun, with violet for the Grand Prix. Three.js and the fonts load from CDNs, so phones need internet.
+The 3D world is Three.js: each course is a terracotta island with a white rim, floating over a violet grid at dusk, with trees, paved road, red-and-white curbs, chevron boost pads, ramps, gates with lifting arms, 3D course lettering and a red off-road car. Menus show the course from above, lessons and races use a chase camera, and the big screen shows the course being raced.
+
+The interface frames the world in a lavender-white border with an "RC" notch at the top. Panels are docked to the bottom with cut corners. Text is a deep plum, actions are violet, and each section gets its own colour (pink, coral, amber, sky, mint) for menu tabs, stat tiles and units. Headings are Bricolage Grotesque, everything you read is Geist, and only the RC-REHAB name uses the stencil font Saira Stencil One. Three.js and the fonts load from CDNs, so phones need internet.
 
 ## Race rules
 
