@@ -6,7 +6,7 @@ import {
   unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
   unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
-import { buildArmLesson, ArmRun, armRaceControl, wheelMix, CAR_TUNE, REAL_CAR, arcMotion, armsFor, LEFT_ARM_STEER } from './arms.js';
+import { buildArmLesson, ArmRun, armRaceControl, wheelMix, CAR_TUNE, REAL_CAR, arcMotion, armsFor, armDir, ArmChord, LEFT_ARM_STEER } from './arms.js';
 import { mc, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
@@ -132,6 +132,7 @@ import('./world3d.js')
 const CAM_SLOTS = { 's-camera': 'cam-slot-camera', 's-cal': 'cam-slot-cal', 's-wait': 'cam-slot-wait', 's-race': 'cam-slot-race', 's-lesson': 'cam-slot-lesson' };
 function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
+  document.body.classList.toggle('demo-on', id === 's-demo');
   const slot = CAM_SLOTS[id];
   if (slot && S.mode === 'head') {
     $(slot).prepend(video);
@@ -1913,6 +1914,7 @@ $('ac-swap').onchange = (e) => {
 // turns (after walls), turned into power for the left and right wheels (arms.js wheelMix).
 const bleDriving = () => ARMS && mc.connected && S.tune.follow && S.local;
 function mirrorRealCar() {
+  if (S.phase === 'demo') return setWheels(S.demo.w.l, S.demo.w.r);
   let car = null;
   if (ARMS && S.tune.follow) {
     if (S.phase === 'racing' && S.local) car = S.car;
@@ -2048,7 +2050,75 @@ document.querySelector('.mc-tests').addEventListener('click', (e) => {
   }
 });
 
+// ---------- Demo mode: no game, the arms drive the real car directly ----------
+// Same mapping, both-arms window, speed and gentle turns as the game: both arms = forward,
+// left arm = turn right, right arm = turn left, relaxed = stop.
+const DEMO_DIR = { fwd: 'Forward', right: 'Turning right', left: 'Turning left', none: 'Stopped' };
+let demoTextAt = 0;
+function openDemo() {
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  S.phase = 'demo';
+  S.demo = { chord: new ArmChord(S.tune.chord), dir: '', w: { l: 0, r: 0 } };
+  show('s-demo');
+  demoText();
+}
+function leaveDemo() {
+  S.demo = null;
+  if (S.profile) return goHome();
+  S.phase = 'setup';
+  show('s-name');
+}
+function demoFrame(sig, dt) {
+  const d = S.demo;
+  const dir = armDir(d.chord.update(sig.face && sig.l, sig.face && sig.r, dt));
+  const a = arcMotion();
+  d.w = dir === 'fwd' ? wheelMix(1, 0, S.tune)
+    : dir === 'right' ? wheelMix(a.speed, a.yaw, S.tune)
+    : dir === 'left' ? wheelMix(a.speed, -a.yaw, S.tune)
+    : { l: 0, r: 0 };
+  if (dir !== d.dir) {
+    d.dir = dir;
+    $('dm-dir').textContent = DEMO_DIR[dir];
+    $('dm-dir').classList.toggle('go', dir !== 'none');
+  }
+  armLights('dm-arms', sig);
+  if (performance.now() - demoTextAt > 200) demoText();
+}
+function demoText() {
+  demoTextAt = performance.now();
+  const w = S.demo?.w || { l: 0, r: 0 };
+  $('dm-status').innerHTML = !mc.connected
+    ? `<span class="lamp"></span>MuscleCar not connected${S.emg.online ? ' · WiFi arm sensors working' : ''}`
+    : !mc.online ? '<span class="lamp"></span>MuscleCar connected, waiting for readings…'
+    : !mc.calibrated ? '<span class="lamp"></span>MuscleCar connected · calibrate it in the settings'
+    : `<span class="lamp on"></span>MuscleCar · left ${mc.adc[0]} · right ${mc.adc[1]}`;
+  $('dm-power').textContent = mc.connected
+    ? `Left wheels ${Math.round(w.l * 100)}% · right wheels ${Math.round(w.r * 100)}%`
+    : 'No car connected: nothing is sent';
+  $('btn-dm-connect').classList.toggle('hidden', mc.connected || !mc.supported);
+}
+$('btn-dm-exit').onclick = leaveDemo;
+$('btn-dm-setup').onclick = () => openArmCheck(openDemo);
+$('btn-dm-connect').onclick = async () => {
+  try {
+    await mcConnect();
+    toast('MuscleCar connected', { icon: 'arm' });
+  } catch (e) {
+    if (e.name !== 'NotFoundError') toast(e.message, { icon: 'info' });
+  }
+  demoText();
+  if (mc.connected && !mc.calibrated) {
+    openArmCheck(openDemo);
+    runMcCalibration();
+  }
+};
+$('btn-demo').onclick = openDemo;
+$('btn-name-demo').onclick = openDemo;
+$('btn-ac-demo').onclick = openDemo;
+
 if (ARMS) {
+  for (const id of ['btn-demo', 'btn-name-demo']) $(id).classList.remove('hidden');
   document.title = 'Head Racer · Arm path';
   $('name-hand').textContent = 'arm path';
   $('name-intro').textContent = 'Biceps exercises with two muscle sensors that see whether each arm is flexing. Every lesson is its own little course: open each gate by squeezing or relaxing on cue, then drive on to the finish line.';
@@ -2081,6 +2151,7 @@ function frame(now) {
     if (held >= 1) $('btn-start').onclick();
   }
   if (S.phase === 'armcheck') armCheckFrame(sig, dt);
+  else if (S.phase === 'demo') demoFrame(sig, dt);
   else if (S.phase === 'waiting' && S.mode === 'arms') armLights('w-arms', sig);
   if (inRace) raceFrame(dt, it, sig);
   if (inLesson) lessonFrame(dt, sig);
@@ -2120,5 +2191,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 if (ARCADE) arcadeHome();
+else if (ARMS && new URLSearchParams(location.search).has('demo')) openDemo();
 else if (PATH || ARMS) show('s-name');
 connect();

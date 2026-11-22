@@ -67,6 +67,7 @@
       </div>
       <p class="error hidden" id="name-error" role="alert"></p>
       <button class="btn primary" id="btn-name"><span>Let's go</span></button>
+      <button class="btn quiet hidden" id="btn-name-demo"><span data-icon="car">Demo mode: just drive the car</span></button>
       <p class="fine">Practise seated with good support. A practice tool to use alongside therapy, not a medical device.</p>
       <p class="fine"><a href="/">Back</a> · Want a quick race for the leaderboard instead? <a href="/arcade">Arcade</a></p>
     </div>
@@ -135,6 +136,7 @@
       </button>
       <span class="chip" data-icon="flame" id="h-streak-chip" aria-label="Week streak"><span id="h-streak">0</span></span>
       <span class="chip xp" data-icon="bolt" aria-label="XP"><span id="h-xp">0</span></span>
+      <button class="chip demo-chip hidden" id="btn-demo" data-icon="car" aria-label="Demo mode: drive the car with your arms, no game"><span>Demo</span></button>
       <button class="sq" id="btn-menu" aria-label="Menu" data-icon="menu"></button>
     </header>
     <div class="home-scroll" id="home-scroll">
@@ -236,6 +238,26 @@
       <p class="fine">Sit with your arms supported. A gentle squeeze is enough: the sensors only see whether the muscle is working, not how hard. Stop if anything hurts, and only add a weight if a therapist says so.</p>
       <button class="btn primary" id="btn-ac-go"><span>Continue</span></button>
       <button class="btn quiet" id="btn-ac-keys"><span data-icon="hand">No sensor: use keys or buttons</span></button>
+      <button class="btn quiet" id="btn-ac-demo"><span data-icon="car">Demo mode: just drive the car</span></button>
+    </div>
+  </section>
+
+  <!-- Demo mode: no game, the arms drive the real car directly -->
+  <section class="screen" id="s-demo">
+    <div class="demo-wrap">
+      <header class="demo-top">
+        <p class="hand tilt">demo mode</p>
+        <button class="btn small quiet" id="btn-dm-exit"><span data-icon="close">Exit</span></button>
+      </header>
+      <p class="car-status" id="dm-status" role="status"></p>
+      <div class="demo-dir" id="dm-dir" aria-live="polite">Stopped</div>
+      <p class="demo-power" id="dm-power"></p>
+      <div class="arm-lights big" id="dm-arms"><button type="button" class="arm-light" data-side="l"><span>Left</span></button><button type="button" class="arm-light" data-side="r"><span>Right</span></button></div>
+      <p class="fine demo-help">Both arms: forward · Left arm: turn right · Right arm: turn left · Relax: stop</p>
+      <div class="row">
+        <button class="btn primary hidden" id="btn-dm-connect"><span data-icon="arm">Connect MuscleCar</span></button>
+        <button class="btn quiet" id="btn-dm-setup"><span data-icon="gear">Sensors and car settings</span></button>
+      </div>
     </div>
   </section>
 
