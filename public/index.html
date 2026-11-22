@@ -204,11 +204,35 @@
   <section class="screen" id="s-arms">
     <div class="panel sheet">
       <p class="hand tilt">arm path</p>
-      <h2 class="title">Sensor check</h2>
-      <p class="car-status" id="ac-status" role="status"></p>
+      <h2 class="title">Sensors and car</h2>
+      <div class="mc-box">
+        <p class="car-status" id="mc-status" role="status"></p>
+        <div class="row">
+          <button class="btn primary" id="btn-mc-connect"><span data-icon="arm">Connect MuscleCar</span></button>
+          <button class="btn quiet hidden" id="btn-mc-cal"><span>Calibrate</span></button>
+        </div>
+        <p class="fine" id="mc-help">The MuscleCar board reads both biceps and drives the real car over Bluetooth (Chrome or Edge).</p>
+      </div>
+      <p class="car-status" id="ac-status"></p>
       <div class="arm-lights big" id="ac-arms"><button type="button" class="arm-light" data-side="l"><span>Left</span></button><button type="button" class="arm-light" data-side="r"><span>Right</span></button></div>
       <ol class="ac-steps" id="ac-steps"></ol>
       <label class="check"><input type="checkbox" id="ac-swap" /><span>Swap left and right (if the wrong side lights up)</span></label>
+      <details class="mc-car hidden" id="mc-car">
+        <summary>Real car</summary>
+        <label class="check"><input type="checkbox" id="mc-follow" /><span>The real car follows the game, in lessons and races</span></label>
+        <label class="mc-slider"><span>Speed <b id="mc-speed-v"></b></span><input type="range" id="mc-speed" min="15" max="100" step="5" /></label>
+        <label class="mc-slider"><span>Turning <b id="mc-turn-v"></b></span><input type="range" id="mc-turn" min="40" max="250" step="10" /></label>
+        <label class="mc-slider"><span>Both-arms window <b id="mc-chord-v"></b></span><input type="range" id="mc-chord" min="0" max="500" step="25" /></label>
+        <p class="fine">Left arm turns right, right arm turns left, both go straight. One arm starting up to this long before the other still goes straight.</p>
+        <div class="mc-tests">
+          <button class="btn small quiet" data-test="left"><span>Quarter turn left</span></button>
+          <button class="btn small quiet" data-test="fwd"><span>Forward 1 s</span></button>
+          <button class="btn small quiet" data-test="right"><span>Quarter turn right</span></button>
+        </div>
+        <p class="fine" id="mc-test-note">Each quarter-turn test should turn the real car about 90°. More? Lower Turning. Less? Raise it.</p>
+        <label class="check"><input type="checkbox" id="mc-swapw" /><span>Swap the wheels (if a test turns the wrong way)</span></label>
+        <p class="fine" id="mc-fw"></p>
+      </details>
       <p class="fine">Sit with your arms supported. A gentle squeeze is enough: the sensors only see whether the muscle is working, not how hard. Stop if anything hurts, and only add a weight if a therapist says so.</p>
       <button class="btn primary" id="btn-ac-go"><span>Continue</span></button>
       <button class="btn quiet" id="btn-ac-keys"><span data-icon="hand">No sensor: use keys or buttons</span></button>

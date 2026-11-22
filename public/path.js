@@ -117,7 +117,7 @@ export const ARM_UNITS = [
       L('which', 'Which arm?', 'A random arm is named: squeeze that one fast, and not the other.', 7, (lv) => Math.max(0.8, 2.5 - 0.25 * lv), (v) => `${v.toFixed(1)} s to react`, ARM_TEXT.quick),
       MIX,
     ],
-    boss: { name: 'Arm Grand Prix', how: 'You steer: left arm turns left, right arm turns right, both drive straight at full speed. Neither slows down.' },
+    boss: { name: 'Arm Grand Prix', how: 'You steer, like driving each side of the car: your left arm turns right, your right arm turns left, both drive straight at full speed. Neither stops the car.' },
   },
 ];
 UNITS.push(...ARM_UNITS);

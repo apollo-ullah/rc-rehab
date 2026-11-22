@@ -3,6 +3,7 @@
 // ArmRun has the same interface as LessonRun (path.js), so lesson courses, the lesson screen and
 // scoring are shared with the head path. See docs/arm-path.md.
 import { UNITS, REPS_PER_LESSON, lessonsOf, isGold, pathOf } from './path.js';
+import { MAX_SPEED, TURN_RATE } from './game.js';
 
 const OTHER = { l: 'r', r: 'l' };
 const NAME = { l: 'left', r: 'right', both: 'both' };
@@ -472,13 +473,200 @@ export function armRaceControl(level, sig, st, dt, autoSteer) {
       if (boost) st.lastBoost = now;
       return { steer: autoSteer, go: sig.face ? 0.45 : 0, boost };
     }
-    case 'a4': { // Arm Grand Prix: left turns left, right turns right, both = full speed straight
-      const l = sig.face && sig.l;
-      const r = sig.face && sig.r;
-      if (l && r) return { steer: 0, go: 1 };
-      if (l || r) return { steer: l ? -1 : 1, go: 0.65 };
+    case 'a4': { // Arm Grand Prix: each arm drives its own side's wheels, both = full speed straight
+      st.chord ??= new ArmChord(st.win ?? CHORD_WIN);
+      const c = (st.cmd = st.chord.update(sig.face && sig.l, sig.face && sig.r, dt));
+      if (c.l && c.r) return { steer: 0, go: 1 };
+      if (c.l || c.r) return { steer: c.l ? LEFT_ARM_STEER : -LEFT_ARM_STEER, go: ARC_GO };
       return { steer: 0, go: 0 };
     }
   }
   return { steer: 0, go: 0 };
+}
+
+// ---------- Driving with both arms, and the real car ----------
+// Like Free Flex (arm-lab): each biceps drives the wheels on its own side of the car. The left
+// arm alone turns the car right, the right arm alone turns it left, both drive straight.
+export const LEFT_ARM_STEER = 1;
+export const ARC_GO = 0.65; // one arm: a gentle forward curve, not a spin
+export const CHORD_WIN = 0.25; // seconds
+
+// Nobody starts or stops both arms at exactly the same moment. One arm on its own only counts
+// as a turn after `win` seconds alone; both arms (forward) and no arms (stop) count at once.
+// So the left arm starting a moment before the right still drives straight, and letting go of
+// one arm a moment before the other doesn't swerve the car.
+export class ArmChord {
+  constructor(win = CHORD_WIN) {
+    this.win = win;
+    this.out = 0; // 0 none, 1 left, 2 right, 3 both
+    this.pend = 0;
+    this.t = 0;
+  }
+  update(l, r, dt) {
+    const k = (l ? 1 : 0) | (r ? 2 : 0);
+    const waits = (k === 1 || k === 2) && (this.out === 0 || this.out === 3);
+    if (!waits) {
+      this.out = k;
+      this.pend = 0;
+      this.t = 0;
+    } else {
+      if (this.pend !== k) {
+        this.pend = k;
+        this.t = 0;
+      }
+      this.t += dt;
+      if (this.t >= this.win - 1e-6) {
+        this.out = k;
+        this.pend = 0;
+        this.t = 0;
+      }
+    }
+    return { l: !!(this.out & 1), r: !!(this.out & 2) };
+  }
+}
+
+// The real car (measured): 2 m in 1 s at full power, 12.5 cm between the left and right wheels,
+// 9 cm between front and back wheels. A 4-wheel car steered by its sides scrubs its tyres
+// sideways in a turn, so it turns about as if its wheels were 1.4x further apart.
+export const REAL_CAR = { topCmS: 200, trackCm: 12.5, wheelbaseCm: 9, skid: 1.4 };
+const effTrack = (c = REAL_CAR) => c.trackCm * c.skid;
+// Turn rate (rad/s, + = right) and forward speed (cm/s) for wheel power l, r (0..1 each).
+export function realMotion(l, r, c = REAL_CAR) {
+  return { cmS: ((l + r) / 2) * c.topCmS, yaw: ((l - r) * c.topCmS) / effTrack(c) };
+}
+
+// Real-car settings. speed: wheel power when the game car is at full speed (lower = slower real car).
+// turn: 1 = the car geometry above; raise it if the real car turns less than the game, lower it if more.
+export const CAR_TUNE = { follow: true, speed: 0.45, turn: 1, chord: CHORD_WIN, swapWheels: false };
+
+// The game car's real movement -> power for the left and right wheels (0..1 each).
+// speed: forward speed as a share of the game's top speed. yaw: turn rate in rad/s, + = right.
+// The real car turns as fast as the game car and drives a smaller copy of its path. It mirrors
+// what the game car actually does, so a game car stuck on a wall stops the real car.
+export function wheelMix(speed, yaw, tune = CAR_TUNE, car = REAL_CAR) {
+  const s = Math.max(0, Math.min(1.3, speed)) * tune.speed;
+  const d = (Math.max(-4, Math.min(4, yaw)) * effTrack(car) * tune.turn) / car.topCmS;
+  if (s < 0.01 && Math.abs(d) < 0.01) return { l: 0, r: 0 };
+  let l = s + d / 2;
+  let r = s - d / 2;
+  // The wheels only go forward: keep the turn and add a little forward instead.
+  if (r < 0) {
+    l -= r;
+    r = 0;
+  }
+  if (l < 0) {
+    r -= l;
+    l = 0;
+  }
+  // More than full power: keep the turn and take away forward.
+  const over = Math.max(l, r) - 1;
+  if (over > 0) {
+    l = Math.max(0, l - over);
+    r = Math.max(0, r - over);
+  }
+  return tune.swapWheels ? { l: r, r: l } : { l, r };
+}
+
+// Which way the arms point the car (Free Flex: left arm = left wheels = turn right).
+export function armDir(c) {
+  if (c.l && c.r) return 'fwd';
+  if (!c.l && !c.r) return 'none';
+  return (c.l ? LEFT_ARM_STEER : -LEFT_ARM_STEER) > 0 ? 'right' : 'left';
+}
+// The arms that give a direction: 'fwd' = both, 'right' / 'left' = one.
+export function armsFor(dir) {
+  const rightArm = LEFT_ARM_STEER > 0 ? 'l' : 'r';
+  if (dir === 'fwd') return { l: true, r: true };
+  if (dir === 'right') return { l: rightArm === 'l', r: rightArm === 'r' };
+  if (dir === 'left') return { l: rightArm === 'r', r: rightArm === 'l' };
+  return { l: false, r: false };
+}
+// The direction the road needs, from the steering that would follow it (-1..1). Keeps a turn
+// until the road is nearly straight again, so the cue doesn't flicker.
+export function needDir(steer, prev = 'fwd') {
+  if (prev === 'right' && steer > 0.15) return 'right';
+  if (prev === 'left' && steer < -0.15) return 'left';
+  return steer > 0.4 ? 'right' : steer < -0.4 ? 'left' : 'fwd';
+}
+
+// The game car's steady one-arm curve, for the quarter-turn test.
+export function arcMotion() {
+  const v = ARC_GO * MAX_SPEED;
+  const grip = Math.min(1, v / 70) * (1 - 0.3 * Math.min(1, v / MAX_SPEED));
+  return { speed: ARC_GO, yaw: TURN_RATE * grip };
+}
+
+// Old car firmware can only press a wheel button or release it. Pressing it for part of the time
+// (a share of each tick) slows the car down: on average the button is held for `duty`.
+export class Pulser {
+  constructor() {
+    this.acc = 0;
+  }
+  next(duty) {
+    if (duty <= 0.02) {
+      this.acc = 0;
+      return false;
+    }
+    if (duty >= 0.98) return true;
+    this.acc += duty;
+    if (this.acc >= 1) {
+      this.acc -= 1;
+      return true;
+    }
+    return false;
+  }
+}
+
+// ---------- Biceps envelope -> flexing or not (from Free Flex's BinarySwitch) ----------
+const median = (v) => {
+  const a = [...v].sort((x, y) => x - y);
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+export function band(values) {
+  const a = [...values].sort((x, y) => x - y);
+  return { low: a[Math.floor(a.length * 0.1)], mid: median(a), high: a[Math.floor(a.length * 0.9)] };
+}
+// Relaxed and squeezing samples of one arm -> thresholds, or { error }.
+// "Flexing" starts at 65% of the way from relaxed to squeezing and ends below 35%.
+export function armProfile(restSamples, flexSamples) {
+  if (restSamples.length < 30 || flexSamples.length < 30) return { error: 'too few readings' };
+  const rest = band(restSamples);
+  const flex = band(flexSamples);
+  // Clear gap between the two bands, or failing that, clearly different middles.
+  const [lo, hi] = rest.high < flex.low ? [rest.high, flex.low] : [rest.mid, flex.mid];
+  if (hi - lo < 25) return { error: 'squeezing looks the same as relaxed' };
+  return { rest: rest.mid, flex: flex.mid, on: lo + 0.65 * (hi - lo), off: lo + 0.35 * (hi - lo) };
+}
+// Median of the last 5 readings, and a change only counts once it lasts a moment.
+export class FlexSwitch {
+  constructor(profile, { onMs = 150, offMs = 200 } = {}) {
+    this.profile = profile;
+    this.onMs = onMs;
+    this.offMs = offMs;
+    this.reset();
+  }
+  reset() {
+    this.active = false;
+    this.win = [];
+    this.since = null;
+    this.lastMs = null;
+  }
+  update(adc, ms) {
+    if (this.lastMs != null && (ms - this.lastMs > 150 || ms < this.lastMs)) this.reset();
+    this.lastMs = ms;
+    this.win.push(adc);
+    if (this.win.length > 5) this.win.shift();
+    const level = median(this.win);
+    const change = this.active ? level <= this.profile.off : level >= this.profile.on;
+    if (!change) this.since = null;
+    else {
+      this.since ??= ms;
+      if (ms - this.since >= (this.active ? this.offMs : this.onMs)) {
+        this.active = !this.active;
+        this.since = null;
+      }
+    }
+    return this.active;
+  }
 }

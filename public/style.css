@@ -711,3 +711,17 @@ input[type='text']:focus { outline: none; box-shadow: inset 0 0 0 2.5px var(--te
 .ac-steps li.done::before { background: var(--good); box-shadow: none; }
 .check { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink-2); }
 .check input { width: 22px; height: 22px; accent-color: var(--teal); flex: none; }
+
+/* ---------- Sensors and car (MuscleCar over Bluetooth) ---------- */
+.mc-box { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(19, 138, 130, 0.07); }
+.mc-car { display: flex; flex-direction: column; gap: 10px; }
+.mc-car[open] { padding-bottom: 4px; }
+.mc-car summary { cursor: pointer; font-weight: 800; color: var(--ink-2); padding: 6px 0; }
+.mc-car > * + * { margin-top: 10px; }
+.mc-slider { display: grid; gap: 4px; font-weight: 700; color: var(--ink-2); }
+.mc-slider span { display: flex; justify-content: space-between; }
+.mc-slider b { font-variant-numeric: tabular-nums; }
+.mc-slider input { width: 100%; accent-color: var(--teal); }
+.mc-tests { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.mc-tests .btn.small { width: 100%; }
+.mc-tests .btn.small > span { justify-content: center; text-align: center; font-size: 13px; padding: 8px 6px; }

@@ -27,8 +27,29 @@ class DriveEvents : public BLECharacteristicCallbacks {
   }
 };
 
+// Head Racer's game page (public/musclecar.js) writes two bytes instead: power for the left and
+// right wheels, 0-255 each. The board pulses each button so the car runs slower than full speed:
+// at 40% power the button is held for 40% of every PULSE_MS. Also expires on heartbeat loss.
+constexpr unsigned long PULSE_MS = 80;     // one on/off cycle
+constexpr unsigned long MIN_PRESS_MS = 12; // shorter presses may not reach the car, so skip them
+std::atomic<uint16_t> wheelPower(0);       // left in the low byte, right in the high byte
+std::atomic<uint32_t> lastPower(0);
+class PowerEvents : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *ch) override {
+    auto value = ch->getValue();
+    wheelPower.store(value.length() == 2 ? uint16_t(uint8_t(value[0]) | uint8_t(value[1]) << 8) : 0);
+    lastPower.store(millis());
+  }
+};
+bool pulsed(uint8_t power, unsigned long now) {
+  const unsigned long on = power * PULSE_MS / 255;
+  if (on < MIN_PRESS_MS) return false;
+  if (on > PULSE_MS - MIN_PRESS_MS) return true;
+  return now % PULSE_MS < on;
+}
+
 class ConnectionEvents : public BLEServerCallbacks {
-  void onDisconnect(BLEServer *) override { lastFlex.store(0); restartAdvertising.store(true); }
+  void onDisconnect(BLEServer *) override { lastFlex.store(0); lastPower.store(0); restartAdvertising.store(true); }
 };
 
 void startBluetooth() {
@@ -44,6 +65,9 @@ void startBluetooth() {
   auto *drive = service->createCharacteristic("e0730c52-b64d-48f3-a0ac-3d0657c85430", BLECharacteristic::PROPERTY_WRITE);
   static DriveEvents commands;
   drive->setCallbacks(&commands);
+  auto *power = service->createCharacteristic("e0730c54-b64d-48f3-a0ac-3d0657c85430", BLECharacteristic::PROPERTY_WRITE);
+  static PowerEvents powerCommands;
+  power->setCallbacks(&powerCommands);
   service->start();
   auto *advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(serviceId);
@@ -88,9 +112,22 @@ void loop() {
   if (restartAdvertising.exchange(false)) BLEDevice::startAdvertising();
   const unsigned long now = millis();
   const uint32_t pulse = lastFlex.load();
-  const uint8_t mask = pulse && uint32_t(now - pulse) < 300 ? wheelMask.load() : 0;
-  digitalWrite(5, mask & 1 ? LOW : HIGH);
-  digitalWrite(7, mask & 2 ? LOW : HIGH);
+  const uint32_t powerAt = lastPower.load();
+  const bool maskFresh = pulse && uint32_t(now - pulse) < 300;
+  const bool powerFresh = powerAt && uint32_t(now - powerAt) < 300;
+  bool left = false, right = false;
+  if (powerFresh && (!maskFresh || int32_t(powerAt - pulse) >= 0)) {
+    // The newest command wins: wheel power from the game page.
+    const uint16_t power = wheelPower.load();
+    left = pulsed(power & 0xFF, now);
+    right = pulsed(power >> 8, now);
+  } else if (maskFresh) {
+    const uint8_t mask = wheelMask.load();
+    left = mask & 1;
+    right = mask & 2;
+  }
+  digitalWrite(5, left ? LOW : HIGH);
+  digitalWrite(7, right ? LOW : HIGH);
   if (now - lastSample >= sampleIntervalMs) {
     lastSample = now;
     envelope = analogRead(sensorPin);

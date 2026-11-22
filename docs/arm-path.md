@@ -126,3 +126,19 @@ biceps → EMG sensor (e.g. MyoWare, envelope output) → ESP32 → wss://…/ap
 - `public/arms.js`: building arm lessons and `ArmRun`, the rep engine for yes/no signals
   (same interface as `LessonRun`, so the lesson courses, HUD and scoring are reused).
 - `server/arena.js`: an `emg` device role; players in the Arm path subscribe to it.
+
+## The real car (MuscleCar over Bluetooth)
+
+- The game page connects to the MuscleCar ESP32-S3 with Web Bluetooth (`public/musclecar.js`),
+  reads both biceps (about 50 readings a second), and decides flexing with thresholds from a
+  6-second calibration (relax, squeeze left, squeeze right), like Free Flex's switch.
+- Mapping (as in Free Flex): each arm drives its own side's wheels. Left arm = turn right, right
+  arm = turn left, both = straight.
+- Both-arms window: one arm alone only counts as a turn after 250 ms alone; both and none count at
+  once. So a slightly late second arm still goes straight, and an uneven let-go doesn't swerve.
+- The real car mirrors the game car's actual forward speed and turn rate (after walls), turned into
+  left/right power with the measured car: 200 cm/s at full power, 12.5 cm track, 9 cm wheelbase,
+  ×1.4 for tyre scrub. Turn rate = (left − right speed) / 17.5 cm, so the game's one-arm curve
+  (97°/s) needs only about 37% vs 22% power: a gentle arc. Lower power is made by pulsing the
+  buttons (on the board with the new firmware, otherwise from the page).
+- Lessons: between gates the car only moves while the arms give the direction the road needs.

@@ -16,9 +16,11 @@ import {
   UNITS, KINDS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode, recordLesson, recordBoss,
   addPractice, weekView, progressLine, addDays, achievements, pathProgress, xpLevel, unitsOf,
 } from '../public/path.js';
-import { buildArmLesson, ArmRun, armRaceControl } from '../public/arms.js';
-import { raceTrack, lessonTrack, selfIntersects, RACE_IDS, LESSON_GATES } from '../public/tracks.js';
+import {
+  buildArmLesson, ArmRun, armRaceControl, ArmChord, wheelMix, realMotion, arcMotion, CAR_TUNE, Pulser, FlexSwitch, armProfile, armDir,
+} from '../public/arms.js';
 import { LessonCourse } from '../public/course.js';
+import { raceTrack, lessonTrack, selfIntersects, RACE_IDS, LESSON_GATES } from '../public/tracks.js';
 
 let failed = 0;
 const check = (ok, label) => {
@@ -454,8 +456,15 @@ function idealSignals(w, v) {
 
   // Boss races: what each pair of signals does to the car.
   const on = (l, r) => ({ l, r, face: true });
-  const a4 = [on(true, true), on(true, false), on(false, true), on(false, false)].map((s) => armRaceControl('a4', s, {}, dt, 0));
-  check(a4[0].go === 1 && a4[0].steer === 0 && a4[1].steer === -1 && a4[2].steer === 1 && a4[3].go === 0, 'Arm Grand Prix: both arms = full speed, one arm steers that way, none = stop');
+  const hold = (s, sec) => {
+    const st = {};
+    let c;
+    for (let t = 0; t < sec; t += dt) c = armRaceControl('a4', s, st, dt, 0);
+    return c;
+  };
+  const a4 = [on(true, true), on(true, false), on(false, true), on(false, false)].map((s) => hold(s, 0.4));
+  check(a4[0].go === 1 && a4[0].steer === 0 && a4[1].steer === 1 && a4[2].steer === -1 && a4[3].go === 0 && armRaceControl('a4', on(true, true), {}, dt, 0).go === 1,
+    'Arm Grand Prix (Free Flex mapping): both arms = full speed at once, left arm turns right, right arm turns left, none = stop');
   const st3 = {};
   let boosts = 0;
   for (let i = 0; i < 480; i++) if (armRaceControl('a3', on(Math.floor(i / 60) % 2 === 0, false), st3, dt, 0).boost) boosts++; // 1 s up, 1 s down
@@ -467,6 +476,91 @@ function idealSignals(w, v) {
   let b2 = 0;
   for (let i = 0; i < 400; i++) if (armRaceControl('a2', on(true, false), st2, dt, 0).boost) b2++;
   check(b2 === 2 && armRaceControl('a2', on(false, false), st2, dt, 0).go === 0, `Long Haul: a boost every 3 s held (${b2} in 6.7 s), stops when you let go`);
+}
+
+// ---------- 3e. The real car over Bluetooth ----------
+{
+  const dt = 1 / 60;
+  // Both-arms window: one arm a moment ahead of the other still means straight on.
+  const run = (fn, sec) => {
+    const c = new ArmChord();
+    const seen = new Set();
+    for (let t = 0; t < sec; t += dt) seen.add(armDir(c.update(...fn(t), dt)));
+    return seen;
+  };
+  const start = run((t) => [t >= 0, t >= 0.15], 1);
+  const stop = run((t) => [t < 0.6, t < 0.75], 1.2);
+  const turn = run((t) => [true, false], 1);
+  check(!start.has('right') && !start.has('left') && start.has('fwd'), `Both-arms window: right arm 150 ms after the left still drives straight, no turn (${[...start]})`);
+  check(!stop.has('right') && !stop.has('left') && stop.has('none'), `Both-arms window: letting go 150 ms apart stops without a swerve (${[...stop]})`);
+  check(turn.has('right'), 'Both-arms window: the left arm alone for longer turns right');
+
+  // Pushing into a wall: the wheels spin in the game but the car doesn't move, so the real car stops.
+  const car = newCar();
+  car.h += Math.PI / 2;
+  for (let t = 0; t < 3; t += dt) step(car, 0, 1, dt);
+  const w = wheelMix(car.vReal / 220, car.yawRate);
+  check(car.v > 30 && car.vReal < 3 && car.throttleOut < 0.02 && w.l === 0 && w.r === 0,
+    `Driving into a wall: game wheels spin (${car.v.toFixed(0)}) but the real car gets no power (moves ${car.vReal.toFixed(1)}, wheels ${w.l}/${w.r})`);
+
+  // The real car turns as fast as the game car (2 m/s at full power, 12.5 cm track, tyre scrub).
+  const a = arcMotion();
+  const right = wheelMix(a.speed, a.yaw);
+  const left = wheelMix(a.speed, -a.yaw);
+  const m = realMotion(right.l, right.r);
+  const straight = wheelMix(1, 0);
+  check(Math.abs(m.yaw - a.yaw) < 0.01 && right.l > right.r && right.r > 0.05 && left.r > left.l && straight.l === straight.r && straight.l === CAR_TUNE.speed,
+    `Real-car power: one-arm curve = left ${right.l.toFixed(2)} / right ${right.r.toFixed(2)} (gentle arc, ${(m.yaw * 57.3).toFixed(0)}°/s like the game), straight = ${straight.l}`);
+  const sw = wheelMix(a.speed, a.yaw, { ...CAR_TUNE, swapWheels: true });
+  check(sw.l === right.r && sw.r === right.l, 'Swap the wheels setting swaps left and right power');
+
+  // Old firmware: pulsing on/off gives the same average power.
+  const p = new Pulser();
+  let n = 0;
+  for (let i = 0; i < 1000; i++) n += p.next(0.37) ? 1 : 0;
+  check(Math.abs(n / 1000 - 0.37) < 0.01, `Pulsing a wheel button averages the asked power (${n / 10}% for 37%)`);
+
+  // Calibrated envelope -> flexing or not, with a short dwell so twitches don't count.
+  const rest = Array.from({ length: 100 }, (_, i) => 300 + (i % 7) * 4);
+  const flex = Array.from({ length: 100 }, (_, i) => 1400 + (i % 9) * 20);
+  const prof = armProfile(rest, flex);
+  const fs2 = new FlexSwitch(prof);
+  let ms = 0;
+  const feed = (v, dur) => {
+    let on;
+    for (let t = 0; t < dur; t += 20) on = fs2.update(v, (ms += 20));
+    return on;
+  };
+  const twitch = feed(1500, 80);
+  const quiet = feed(310, 400);
+  const flexed = feed(1500, 400);
+  const relaxed = feed(310, 400);
+  check(!prof.error && !twitch && !quiet && flexed && !relaxed && armProfile(rest, rest).error, 'EMG calibration: thresholds between relaxed and squeezing; an 80 ms twitch is ignored, a squeeze counts, same-level recordings are refused');
+
+  // Lessons: between gates the car only moves while the arms give the direction the road needs.
+  const ui = unitsOf('arms')[0].ui;
+  const lessonRun = (arms) => {
+    const lesson = buildArmLesson(newProfile('Car', '2026-11-21'), ui, 0, { rng: () => 0.3 });
+    const r = new ArmRun(lesson);
+    const c = new LessonCourse(lessonTrack(ui, 0), r, { armSteer: {} });
+    let moved = 0;
+    let wrongWay = 0;
+    for (let t = 0; t < 300 && c.mode !== 'done'; t += dt) {
+      const x = c.car.x;
+      const y = c.car.y;
+      const sig = c.mode === 'gate' ? { ...r.want(), face: true } : { ...arms(c.botArms()), face: true };
+      c.update(sig, dt);
+      const d = Math.hypot(c.car.x - x, c.car.y - y);
+      moved += d;
+      if (c.steer.have !== c.steer.need && c.steer.have !== 'none' && d > 4 * dt * 60) wrongWay++;
+    }
+    return { done: c.mode === 'done', moved, wrongWay };
+  };
+  const good = lessonRun((b) => b);
+  const wrong = lessonRun((b) => (b.l && b.r ? { l: true, r: false } : { l: b.r, r: b.l }));
+  const idle = lessonRun(() => ({ l: false, r: false }));
+  check(good.done && wrong.moved === 0 && idle.moved === 0,
+    `Arm lessons: the right arms drive to the finish; wrong arms (moved ${wrong.moved.toFixed(0)}) or no arms (moved ${idle.moved.toFixed(0)}) never move the car`);
 }
 
 // ---------- 4. Server ----------
