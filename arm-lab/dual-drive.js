@@ -4,7 +4,14 @@ const el=id=>document.getElementById(id);
 const buttons=[...document.querySelectorAll('[data-ref]')];
 const uuid=s=>'e0730c'+s+'-b64d-48f3-a0ac-3d0657c85430';
 let device,drive,samples,refs={},filters,cap,armed=false,writing=false,last=-Infinity,mask=0,seq;
-function disarm(){armed=false;el('arm').textContent='Enable wheels'}
+let manualMask=0,manualUntil=0;
+const manualButtons=[...document.querySelectorAll('[data-drive]')];
+for(const button of manualButtons)button.onclick=()=>{
+ if(!drive||document.hidden||performance.now()-last>=150||cap)return;
+ disarm();manualMask=Number(button.dataset.drive);manualUntil=performance.now()+500;
+};
+el('manualStop').onclick=()=>disarm();
+function disarm(){manualMask=0;manualUntil=0;armed=false;el('arm').textContent='Enable wheels'}
 function clean(){
  disarm();drive=null;cap=null;refs={};filters=null;last=-Infinity;seq=undefined;mask=0;
  samples?.removeEventListener('characteristicvaluechanged',receive);samples=null;
@@ -56,7 +63,9 @@ setInterval(async()=>{
  if(!fresh||document.hidden)disarm();
  if(!fresh && drive)el('state').textContent='Waiting for fresh samples';
  buttons.forEach(b=>b.disabled=!fresh||!!cap);
- el('arm').disabled=!armed && !(fresh && filters && mask===0);
- if(!armed||writing)return;
- writing=true;try{await drive.writeValueWithResponse(Uint8Array.of(mask))}catch{disarm()}finally{writing=false}
+ if(performance.now()>=manualUntil)manualMask=0;
+ manualButtons.forEach(b=>b.disabled=!fresh||!!cap);
+ el('arm').disabled=!!manualMask||!armed && !(fresh && filters && mask===0);
+ if(!drive||writing)return;
+ writing=true;try{await drive.writeValueWithResponse(Uint8Array.of(manualMask || (armed?mask:0)))}catch{disarm()}finally{writing=false}
 },80);
