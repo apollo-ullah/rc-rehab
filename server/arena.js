@@ -86,7 +86,7 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
     }
     fastest.sort((a, b) => a.ms - b.ms);
     improved.sort((a, b) => b.gainMs - a.gainMs);
-    return { fastest: fastest.slice(0, 10), improved: improved.slice(0, 5) };
+    return { fastest, improved };
   }
 
   // ---------- State ----------

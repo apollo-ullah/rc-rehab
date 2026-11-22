@@ -1,10 +1,135 @@
 # RC-Rehab
 
-A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The link people get (`/`) opens the Arcade. The team's menu of all three modes is at `/team`, which nothing links to:
+**Rehab that kids actually want to do.** Muscle sensors and a phone camera turn cerebral palsy exercises into a racing game, and a real RC car drives every rep.
 
-- **Arcade** (`/arcade`): type a name, do the quick face setup and race the **Grand Prix** (head steers, a face move drives). Everyone races with **no driving help**, so times compare. The real RC car drives along through an ESP32 when it's connected. Times go on one **shared, saved leaderboard** (fastest and most improved) that anyone with the link sees, live. "Next player" clears everything for the next person, so it works on the event laptop and on anyone's own phone.
-- **Practice path** (`/path`, on anyone's own phone or computer): a **roadmap** of 24 stops: four units (head steady, left and right, jaw, lips) of five lessons and a boss race each, plus the Grand Prix. Every lesson is its own little **course**: the car drives itself to a gate, you do the exercise to open it, and the lesson ends when the car crosses the finish line. Progress is saved **in that browser only**, so coming back on the same phone picks up where you left off. Everything is open from day one; the path only suggests an order.
-- **Arm path** (`/arms`): the same kind of roadmap for the **biceps**, from two EMG muscle sensors on an ESP32 that only report whether each arm is flexing. Four units (wake up, hold strong, curls, left and right) of five lessons and a boss race on the real car. No camera. See [Arm path](#arm-path) below.
+### ▶ Play it now: **[rc-rehab.vercel.app](https://rc-rehab.vercel.app)**: no download, no account
+
+<p>
+  <img src="docs/screenshots/arcade.jpg" width="24%" alt="Arcade: the Grand Prix island and the leaderboard">
+  <img src="docs/screenshots/practice-path.jpg" width="24%" alt="Practice path home: the next lesson and the weekly goal">
+  <img src="docs/screenshots/lesson.jpg" width="24%" alt="A lesson: the car waits at a gate until the right arm squeezes">
+  <img src="docs/screenshots/race.jpg" width="24%" alt="The Arm Grand Prix with left and right arm lights">
+</p>
+
+## Inspiration
+
+A few days before this hackathon, we read about a **nine-year-old boy with cerebral palsy**, the most common physical disability in childhood. He couldn't open his right hand on his own, and his therapy was one movement, open and close, thousands of times at home. Researchers turned that therapy into video games. Over six weeks he played for 43 hours, did 161 of his 169 home sessions, and **held a lightsaber for the first time** ([Fu et al. 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)).
+
+Then the study ended, the games went back to the lab, and four weeks later **most of his gains were gone**.
+
+That's the real problem. Rehab only works if kids keep doing it at home, and progress is slow, the reps are boring, and kids get discouraged. **Between 34% and 79% of families of children with CP don't keep up with their home exercise programs** ([Niyonsenga et al. 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11168686/)).
+
+So we asked: **what if the therapy never had to go back to the lab, because it was a toy kids already wanted to play with?** Our main build lets kids drive a real RC car with their own muscles through EMG sensors, and RC-Rehab wraps it in a Duolingo-style game so they come back every day.
+
+## Why gamify it? The numbers
+
+| | |
+|---|---|
+| **~1,000 vs ~70** | hand movements per hour in the therapy games vs regular task practice, for the boy in the study ([Fu 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)) |
+| **95%** | of his assigned home sessions done when the therapy was a game ([Fu 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)) |
+| **Large effect (d = 0.86)** | of game-based VR therapy on motor function vs other treatments, across 19 randomized trials in children with CP ([Chen et al. 2018](https://pmc.ncbi.nlm.nih.gov/articles/PMC6692882)) |
+| **~7× more reps** | per day with self-directed therapy games than standard care, in stroke rehab (104 vs 15) ([Broderick et al. 2021](https://eprints.soton.ac.uk/453387/1/Self_directed_exergaming_for_stroke_upper_limb_impairment_increases_exercise_dose_compared_to_standard_care_proof.pdf)) |
+
+## What it does
+
+- **Arm mode** ([/arms](https://rc-rehab.vercel.app/arms)): an EMG sensor on each bicep drives the RC car. Flex left and the left wheels drive, flex right and the right wheels drive, flex both and it goes straight. The car on screen and the car on the floor move together.
+- **Camera mode** ([/path](https://rc-rehab.vercel.app/path)): for kids who can't use their arms. The phone camera turns head turns into steering and face moves (open mouth, raised eyebrows, smile) into the gas pedal.
+- **A daily path, like Duolingo:** a roadmap of 24 stops. Every lesson is a race track with 10 gates, and **each gate opens with one rep**. It gets harder when you're doing well, easier when you're struggling, and tells you when to rest.
+- **For the therapist:** every rep is logged, and the session log downloads as a spreadsheet.
+- **Arcade** ([rc-rehab.vercel.app](https://rc-rehab.vercel.app)): race the Grand Prix with your head and face for a spot on the live leaderboard.
+
+> To the kid, it's a race. To the therapist, it's hundreds of reps that wouldn't have happened otherwise.
+
+## Built on real research
+
+We didn't guess at a single exercise. We read **19 published papers and reviews** (PubMed, PubMed Central and peer-reviewed journals), and every rule in the game traces back to one of them:
+
+- **Relaxing counts as much as squeezing.** In CP the biceps are often over-active, so letting go on cue is a skill ([EMG + VR study](https://content.iospress.com/articles/neurorehabilitation/nre1402)). The game never says "squeeze harder".
+- **Feedback fades.** Motor learning works best when feedback fades, so the meter hides itself every third rep once you're doing well ([MacIntosh 2019](https://www.em-consulte.com/article/1227431/article/biofeedback-intervention-effects-for-people-with-c), [JSLHR 2023](https://pubs.asha.org/doi/10.1044/2022_JSLHR-22-00375)).
+- **Reps and rest follow CP strength guidelines:** about 10 easy reps, rest between sets, every other day ([Verschuren 2016](https://deepblue.lib.umich.edu/handle/2027.42/133572), [Scholtes 2008](https://pmc.ncbi.nlm.nih.gov/articles/PMC2579291)).
+- **Honest where evidence is weak.** Mouth exercises are framed as control practice, never as speech treatment ([Arvedson 2010](https://onlinelibrary.wiley.com/doi/10.1111/j.1469-8749.2010.03707.x)).
+
+<details>
+<summary><b>Every design rule and its paper (15)</b></summary>
+
+| What the research says | What we built from it |
+|---|---|
+| Goal-directed, task-based practice is one of the best-supported approaches in CP ([Novak 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7035308/)) | Short lessons with one clear goal each, and a daily goal in minutes |
+| Games played with head movements have helped children with CP, but the studies are small ([Velasco 2017](https://pmc.ncbi.nlm.nih.gov/articles/PMC5568605)) | Head steering as practice, framed honestly as a tool to use alongside therapy |
+| Biofeedback helps, but the evidence is "very low" quality; feedback works best when it fades and the player chooses it ([MacIntosh 2019](https://www.em-consulte.com/article/1227431/article/biofeedback-intervention-effects-for-people-with-c), [JSLHR 2023](https://pubs.asha.org/doi/10.1044/2022_JSLHR-22-00375)) | The live meter hides itself every third rep once a lesson goes well, and players can hide it any time |
+| Evidence for mouth (oral-motor) exercises is weak ([Arvedson 2010](https://onlinelibrary.wiley.com/doi/10.1111/j.1469-8749.2010.03707.x)) | Jaw and lip units are control practice, never sold as treatment for speech or eating |
+| Choice and autonomy keep people playing rehab games ([JMIR Serious Games 2024](https://games.jmir.org/2024/1/e49029)) | Nothing is locked, no lives to lose, and a weekly streak with rest days |
+| Fatigue builds quickly and rest matters ([PMC4942358](https://pmc.ncbi.nlm.nih.gov/articles/PMC4942358)) | An "I'm tired" button that earns credit, fatigue signs that stop difficulty going up, and a rest after every lesson |
+| Wearable EMG biofeedback improved arm goals in a pilot study ([Bloom 2010](https://pubmed.ncbi.nlm.nih.gov/20525944/)) | Biceps lessons from two EMG sensors |
+| In CP the biceps are often over-active, and games helped balance them ([EMG + VR study](https://content.iospress.com/articles/neurorehabilitation/nre1402)) | Letting go on cue counts as much as squeezing, and nothing ever says "squeeze harder" |
+| Strength training in CP follows youth guidelines: sets of about 10 easy reps, rest between sets, every other day ([Verschuren 2016](https://deepblue.lib.umich.edu/handle/2027.42/133572), [Scholtes 2008](https://pmc.ncbi.nlm.nih.gov/articles/PMC2579291)) | 10 reps per lesson, the drive between gates is the rest, and arm days are suggested every other day |
+| Two-muscle control is taught step by step: each muscle alone, hold, sequence, then both ([ADAPT-MP](https://pmc.ncbi.nlm.nih.gov/articles/PMC6050406), [UNB](https://www.unb.ca/ibme/_assets/documents/past-docs/MEC17-papers/tabor-quantifying-muscle-control.pdf), [JNER 2021](https://link.springer.com/doi/10.1186/s12984-021-00831-5)) | The arm units go in that order: wake up, hold strong, curls, then left and right |
+| Mirror movements (the other arm joining in) are common, and coping works better than drilling ([mirror movement studies](https://pmc.ncbi.nlm.nih.gov/articles/PMC3159754)) | "Just one" lets the other arm join at first and only slowly asks it to stay quiet |
+
+Full reasoning for the arm exercises: [docs/arm-path.md](docs/arm-path.md).
+</details>
+
+## How to try it
+
+1. Open **[rc-rehab.vercel.app](https://rc-rehab.vercel.app)** on a phone or a laptop with a webcam.
+2. Type a name, press **Play** and allow the camera. **Video never leaves your device.**
+3. Do the 10-second setup (relax, steer left, steer right, show your GO move), then race.
+
+| Link | What you get |
+|---|---|
+| [rc-rehab.vercel.app](https://rc-rehab.vercel.app) | Arcade: race with your head and face |
+| [/path](https://rc-rehab.vercel.app/path) | Camera mode: the head and face lesson path |
+| [/arms](https://rc-rehab.vercel.app/arms) | Arm mode. No sensors? Hold **A** / **D** or the on-screen buttons |
+| [/path?autopilot](https://rc-rehab.vercel.app/path?autopilot) | Watch it play itself |
+| [/screen](https://rc-rehab.vercel.app/screen) | Big screen: live race and leaderboard |
+
+No camera? Tap **Use touch controls instead**. The real car only joins when it's with us, so online races run on screen. Connecting the Bluetooth car needs Chrome or Edge.
+
+## How we built it
+
+- **Muscle signal:** **MyoWare 2.0** EMG sensors feed an **ESP32-S3**, which streams both arms over **Bluetooth Low Energy** straight into the browser with **Web Bluetooth**. A 6-second calibration (relax, squeeze left, squeeze right) learns each person's own range and sets hysteresis thresholds, so it works with whatever strength that arm has. Our Arm Lab test bench adds a classifier over 1.2-second windows (mean, RMS, 90th percentile, spread) that refuses to guess when the signal is unclear.
+- **Computer vision:** **Google MediaPipe Face Landmarker** runs on the phone's GPU, tracking 478 face points and 52 expressions. We compute head turn, tilt and nod, and calibration picks whichever movement and gesture the player does most clearly.
+- **Game:** **Three.js** with 20+ hand-built courses and arcade physics, all in the browser.
+- **Real car:** the RC remote only has on/off buttons, so the ESP32 presses them for it, pulsing each side's wheels to copy the game car's speed and turns.
+- **Live backend:** **Node.js** WebSockets on **Vercel** functions, with **Upstash Redis** relaying messages between servers. A leader lock and saved snapshots keep races alive through dropped connections and server handovers.
+
+## Challenges we ran into
+
+- **The signal is tiny.** A muscle signal is a few thousandths of a volt buried in noise. Move the sensor a centimetre and it disappears, and every arm reads differently. Per-person calibration fixed it.
+- **The car's remote was never built to be taken over.** We wired an ESP32 to fake button presses and pulse them for partial speed.
+- **At 3 a.m., with 24 hours left, we almost scrapped it.** Then someone pointed out that the boy did that movement thousands of times with a hand that wouldn't listen, and we were quitting after a few tries with hands that work fine. We plugged it back in, and now it drives.
+
+## Accomplishments we're proud of
+
+- A real car driven by muscle signals, mirrored live in a 3D game.
+- Two complete therapy paths that adapt to each player's own range.
+- It runs from a link in any browser, with no install, no account, and no video uploaded.
+- 100 automated checks drive every lesson and course to the finish.
+
+## What we learned
+
+- In CP the hard part is often **switching a muscle off**, not on.
+- Kids don't need more exercises. They need a reason to do the ones they have.
+
+## What's next
+
+- Test with kids with CP and their physiotherapists, and tune the sensors on real arms.
+- A therapist dashboard to set goals and track progress week by week.
+- More sensors (forearm, legs) so more kids can play.
+
+## Built with
+
+`MyoWare 2.0 EMG` · `ESP32-S3` · `Bluetooth Low Energy` · `Web Bluetooth` · `MediaPipe` · `Three.js` · `JavaScript` · `Node.js` · `WebSockets` · `Vercel` · `Upstash Redis` · `Arduino`
+
+---
+
+# Technical guide
+
+Everything below is for running, building and wiring it up yourself.
+
+## Architecture
+
+The team's menu of all three modes is at `/team`, which nothing links to. **Demo mode** (`/arms?demo`) skips the game: your arms drive the real car directly.
 
 ```
 Online:  Laptop / phones / big screen --HTTPS--> Vercel (static pages + WebSocket functions) <--wss:// from any WiFi-- ESP32 --> controller buttons
@@ -62,7 +187,7 @@ npm start
 
 The quick-tunnel link changes every time you restart, but the QR code updates by itself. Laptop data is saved in `data/`.
 
-Test without hardware: `npm test` (74 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, full races through the server with a fake phone and a fake car, and races carrying on when the connection blips or the game moves to another server).
+Test without hardware: `npm test` (100 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, full races through the server with a fake phone and a fake car, and races carrying on when the connection blips or the game moves to another server).
 Test without a camera: on the phone, tap "Use touch controls instead". In lessons, slide sideways for left/right and drag up for face moves. On a laptop, the arrow keys / WASD also work.
 Demo without a face: open `<link>/path?autopilot` (or `<link>/?autopilot` for the Arcade) and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
 No real car? In the practice path, boss races and the Grand Prix have **Play on this phone**: the same race without the line or the car. It counts for practice and XP and is marked "(phone)" in the CSV, but stays off the leaderboard. Arcade races always go through the line, so they always count, with or without the car.
@@ -157,7 +282,9 @@ Small head movements give small turns: the first 20% of a movement is ignored, a
 
 ## Look
 
-A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in its own colours: each course is a bevelled island with a glowing rim floating over a pale grid, with rounded trees, paved road, red-and-white curbs, chevron boost pads, gates with lifting arms, 3D course lettering and a rounded coral car. Each unit has a theme (lake, forest, canyon, beach, park). Menus show the next course from above, a stop shows its island, lessons and races use a chase camera, and the big screen shows the course being raced. The interface is framed paper panels and square icon buttons with toasts for achievements. Titles are Amatic SC and everything you read is Nunito. Unit colours are sky, mint, coral and sun, with violet for the Grand Prix. Three.js and the fonts load from CDNs, so phones need internet.
+The 3D world is Three.js: each course is a terracotta island with a white rim, floating over a violet grid at dusk, with trees, paved road, red-and-white curbs, chevron boost pads, ramps, gates with lifting arms, 3D course lettering and a red off-road car. Menus show the course from above, lessons and races use a chase camera, and the big screen shows the course being raced.
+
+The interface frames the world in a lavender-white border with an "RC" notch at the top. Panels are docked to the bottom with cut corners. Text is a deep plum, actions are violet, and each section gets its own colour (pink, coral, amber, sky, mint) for menu tabs, stat tiles and units. Headings are Bricolage Grotesque, everything you read is Geist, and only the RC-REHAB name uses the stencil font Saira Stencil One. Three.js and the fonts load from CDNs, so phones need internet.
 
 ## Race rules
 

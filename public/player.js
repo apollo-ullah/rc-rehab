@@ -1621,7 +1621,7 @@ function showResult(r) {
     $('res-stats-title').classList.remove('hidden');
     $('btn-again').innerHTML = `<span data-icon="play">${r.local ? 'Race again on this phone' : 'Race again'}</span>`;
     mountIcons($('btn-again'));
-    if (ARCADE) renderBoard($('res-board'), S.board.fastest.slice(0, 5), S.name);
+    if (ARCADE) renderBoard($('res-board'), S.board.fastest, S.name);
     $('res-board').classList.toggle('hidden', !ARCADE);
     $('res-board-title').classList.toggle('hidden', !ARCADE);
     show('s-result');
