@@ -178,3 +178,15 @@ A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in it
 | Camera doesn't start on the phone | The page must be opened from an `https://` link (the app's link, or the `…trycloudflare.com` one on a laptop). On iPhone: Settings → Safari → Camera → Allow. |
 | Face tracking slow on an old phone | Use touch controls, or lend a newer phone. |
 | Real car too fast or drifts too much | Lower `SPEED_SCALE` in the firmware. |
+
+## Two-bicep car demo and game replay
+
+Flash the ESP32-S3 with [MuscleCar](firmware/MuscleCar/MuscleCar.ino).
+Left and right MyoWare ENV use GPIO2 and GPIO8 respectively. Run
+`python3 arm-lab/serve.py` and open [Free Flex](http://127.0.0.1:8741/blind.html)
+in a Web Bluetooth capable browser. Connect both biceps, capture rest and flex
+for each side, then enable the wheels while relaxed.
+
+Use **Start game recording**, **Finish recording**, and **Download game JSON**
+to capture timestamped sensor readings and wheel commands for playback.
+See the [game replay format](docs/game-replay-guide.txt) for the movement mapping.

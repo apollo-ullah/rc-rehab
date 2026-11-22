@@ -1,0 +1,22 @@
+Arm Lab game replay · arm-lab-game-v1
+
+Load the recording as JSON. Start a game timer at zero with both wheels stopped.
+On each game tick, consume every commands entry with t_ms <= elapsed milliseconds,
+in array order. Apply left_forward and right_forward as the latest wheel state.
+Hold that state until the next command. Stop both wheels at duration_ms.
+
+left_forward  right_forward  movement
+false         false          stop
+true          false          turn right
+false         true           turn left
+true          true           forward
+
+The commands describe Bluetooth writes acknowledged by the ESP32. The car has
+no wheel encoders in this setup. For a visual match, tune straight speed and
+turn rate against the physical car.
+
+samples contains both MyoWare envelope readings (left_env and right_env,
+12-bit ADC counts), each detector's prediction (left_flex and right_flex,
+null until calibrated), the ESP32 sequence number and device_ms. Use t_ms
+to align samples and commands on the recording timeline. Playback uses the
+commands, which already account for whether each wheel was enabled.
