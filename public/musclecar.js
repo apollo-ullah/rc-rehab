@@ -59,7 +59,18 @@ function useCal(cal) {
   switches = cal ? cal.map((p) => new FlexSwitch(p)) : [null, null];
   mc.flex = [false, false];
 }
-useCal(loadCal());
+const cutoffKey = 'rc-mc-cutoff';
+const modes = ['3750', '3800', '4000', 'adaptive'];
+export function selectCutoff(mode) {
+  mc.cutoff = modes.includes(mode) ? mode : '3800';
+  const on = Number(mc.cutoff);
+  const profile = { on, off: on - 50 };
+  useCal(mc.cutoff === 'adaptive' ? loadCal() : [profile, profile]);
+  try { localStorage.setItem(cutoffKey, mc.cutoff); } catch {}
+}
+let savedCutoff;
+try { savedCutoff = localStorage.getItem(cutoffKey); } catch {}
+selectCutoff(savedCutoff);
 
 function receive(e) {
   const d = e.target.value;

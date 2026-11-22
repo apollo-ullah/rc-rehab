@@ -7,7 +7,7 @@ import {
   unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
 import { buildArmLesson, ArmRun, armRaceControl, CAR_TUNE, armsFor, armDir, LEFT_ARM_STEER } from './arms.js';
-import { mc, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
+import { mc, selectCutoff, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
 import { mountIcons, iconSvg } from './icons.js';
@@ -1939,7 +1939,9 @@ function renderMc() {
   $('mc-status').innerHTML = mcStatusHtml();
   $('btn-mc-connect').innerHTML = `<span data-icon="arm">${mc.connected ? 'Disconnect' : 'Connect MuscleCar'}</span>`;
   $('btn-mc-connect').disabled = !mc.supported || mcBusy;
-  $('btn-mc-cal').classList.toggle('hidden', !mc.connected);
+  $('mc-cutoff').value = mc.cutoff;
+  $('mc-cutoff').disabled = mcBusy;
+  $('btn-mc-cal').classList.toggle('hidden', !mc.connected || mc.cutoff !== 'adaptive');
   $('btn-mc-cal').disabled = mcBusy;
   $('btn-mc-cal').innerHTML = `<span>${mc.calibrated ? 'Calibrate again' : 'Calibrate'}</span>`;
   $('mc-car').classList.toggle('hidden', !mc.connected);
@@ -1970,7 +1972,7 @@ $('btn-mc-connect').onclick = async () => {
     await mcConnect();
     toast('MuscleCar connected', { icon: 'arm' });
     $('mc-car').open = true;
-    mcHelp(mc.calibrated ? 'Using your last calibration. Calibrate again if the pads moved.' : 'Next: calibrate, so it knows your relaxed and squeezing levels.');
+    mcHelp(mc.cutoff !== 'adaptive' ? cutoffHint() : mc.calibrated ? 'Using your last calibration. Calibrate again if the pads moved.' : 'Next: calibrate, so it knows your relaxed and squeezing levels.');
   } catch (e) {
     mcHelp(e.name === 'NotFoundError' ? 'No board chosen. Turn MuscleCar on and try again.' : e.message);
   }
@@ -2011,6 +2013,16 @@ async function runMcCalibration() {
     renderArmCheck();
   }
 }
+function cutoffHint() {
+  return 'Both arms: flex at ' + mc.cutoff + ', release at ' + (Number(mc.cutoff) - 50) + '.';
+}
+$('mc-cutoff').onchange = (e) => {
+  selectCutoff(e.target.value);
+  if (S.armCheck) Object.assign(S.armCheck, {step: 0, t: 0, done: false});
+  mcHelp(mc.cutoff === 'adaptive' ? 'Capture rest and flex with Calibrate.' : cutoffHint());
+  renderArmStatus();
+  renderArmCheck();
+};
 $('btn-mc-cal').onclick = runMcCalibration;
 $('mc-follow').onchange = (e) => {
   S.tune.follow = e.target.checked;
