@@ -2,7 +2,7 @@
 
 **Rehab that kids actually want to do.** Muscle sensors and a phone camera turn cerebral palsy exercises into a racing game, and a real RC car drives every rep.
 
-[![Watch the demo: Driving an RC Car With Only My Muscles](https://img.youtube.com/vi/MJj3O7IUdX8/maxresdefault.jpg)](https://youtu.be/MJj3O7IUdX8)
+[![Watch the demo: Driving an RC Car With Only My Muscles](docs/screenshots/demo-video.jpg)](https://youtu.be/MJj3O7IUdX8)
 
 **▶ [Watch the demo](https://youtu.be/MJj3O7IUdX8)** · **[Play it at rc-rehab.vercel.app](https://rc-rehab.vercel.app)** (no download, no account)
 
