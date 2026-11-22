@@ -2,7 +2,24 @@
 
 **Rehab that kids actually want to do.** Muscle sensors and a phone camera turn cerebral palsy exercises into a racing game, and a real RC car drives every rep.
 
-### ▶ Play it now: **[rc-rehab.vercel.app](https://rc-rehab.vercel.app)**: no download, no account
+[![Watch the demo: Driving an RC Car With Only My Muscles](https://img.youtube.com/vi/MJj3O7IUdX8/maxresdefault.jpg)](https://youtu.be/MJj3O7IUdX8)
+
+**▶ [Watch the demo](https://youtu.be/MJj3O7IUdX8)** · **[Play it at rc-rehab.vercel.app](https://rc-rehab.vercel.app)** (no download, no account)
+
+## Inspiration
+
+A nine-year-old boy with cerebral palsy couldn't open his right hand, and his therapy was opening and closing it thousands of times at home. Researchers turned it into video games: in six weeks he played 43 hours and **held a lightsaber for the first time**. Then the study ended, the games went back to the lab, and **most of his gains were gone four weeks later** ([Fu et al. 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)).
+
+That's the real problem. The same reps at home get discouraging, and **34–79% of families of children with CP don't keep up with home exercise programs** ([Niyonsenga et al. 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11168686/)). Games change that: the boy made **~1,000 hand movements an hour in games vs ~70 in regular practice**, and across 19 randomized trials, game-based therapy had a **large effect** on motor function in children with CP ([Fu 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443), [Chen 2018](https://pmc.ncbi.nlm.nih.gov/articles/PMC6692882)).
+
+So we built a toy kids want to play with: drive a real RC car with your own muscles, inside a Duolingo-style game that brings you back every day.
+
+## What it does
+
+- **Arm mode** ([/arms](https://rc-rehab.vercel.app/arms)): an EMG sensor on each bicep drives a real RC car. Flex left, right or both to steer, and the game car on screen moves with it.
+- **Camera mode** ([/path](https://rc-rehab.vercel.app/path)): no sensors needed. Your head steers and face moves (open mouth, raised eyebrows, smile) are the gas pedal.
+- **A daily path, like Duolingo:** every lesson is a race track with 10 gates, and **each gate opens with one rep**. It adapts to how you're doing, tells you when to rest, and logs every rep for the therapist.
+- **Arcade** ([rc-rehab.vercel.app](https://rc-rehab.vercel.app)): race the Grand Prix for a spot on the live leaderboard.
 
 <p>
   <img src="docs/screenshots/arcade.jpg" width="24%" alt="Arcade: the Grand Prix island and the leaderboard">
@@ -11,38 +28,11 @@
   <img src="docs/screenshots/race.jpg" width="24%" alt="The Arm Grand Prix with left and right arm lights">
 </p>
 
-## Inspiration
-
-A few days before this hackathon, we read about a **nine-year-old boy with cerebral palsy**, the most common physical disability in childhood. He couldn't open his right hand on his own, and his therapy was one movement, open and close, thousands of times at home. Researchers turned that therapy into video games. Over six weeks he played for 43 hours, did 161 of his 169 home sessions, and **held a lightsaber for the first time** ([Fu et al. 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)).
-
-Then the study ended, the games went back to the lab, and four weeks later **most of his gains were gone**.
-
-That's the real problem. Rehab only works if kids keep doing it at home, and progress is slow, the reps are boring, and kids get discouraged. **Between 34% and 79% of families of children with CP don't keep up with their home exercise programs** ([Niyonsenga et al. 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11168686/)).
-
-So we asked: **what if the therapy never had to go back to the lab, because it was a toy kids already wanted to play with?** Our main build lets kids drive a real RC car with their own muscles through EMG sensors, and RC-Rehab wraps it in a Duolingo-style game so they come back every day.
-
-## Why gamify it? The numbers
-
-| | |
-|---|---|
-| **~1,000 vs ~70** | hand movements per hour in the therapy games vs regular task practice, for the boy in the study ([Fu 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)) |
-| **95%** | of his assigned home sessions done when the therapy was a game ([Fu 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7364443)) |
-| **Large effect (d = 0.86)** | of game-based VR therapy on motor function vs other treatments, across 19 randomized trials in children with CP ([Chen et al. 2018](https://pmc.ncbi.nlm.nih.gov/articles/PMC6692882)) |
-| **~7× more reps** | per day with self-directed therapy games than standard care, in stroke rehab (104 vs 15) ([Broderick et al. 2021](https://eprints.soton.ac.uk/453387/1/Self_directed_exergaming_for_stroke_upper_limb_impairment_increases_exercise_dose_compared_to_standard_care_proof.pdf)) |
-
-## What it does
-
-- **Arm mode** ([/arms](https://rc-rehab.vercel.app/arms)): an EMG sensor on each bicep drives the RC car. Flex left and the left wheels drive, flex right and the right wheels drive, flex both and it goes straight. The car on screen and the car on the floor move together.
-- **Camera mode** ([/path](https://rc-rehab.vercel.app/path)): for kids who can't use their arms. The phone camera turns head turns into steering and face moves (open mouth, raised eyebrows, smile) into the gas pedal.
-- **A daily path, like Duolingo:** a roadmap of 24 stops. Every lesson is a race track with 10 gates, and **each gate opens with one rep**. It gets harder when you're doing well, easier when you're struggling, and tells you when to rest.
-- **For the therapist:** every rep is logged, and the session log downloads as a spreadsheet.
-- **Arcade** ([rc-rehab.vercel.app](https://rc-rehab.vercel.app)): race the Grand Prix with your head and face for a spot on the live leaderboard.
-
 > To the kid, it's a race. To the therapist, it's hundreds of reps that wouldn't have happened otherwise.
 
 ## Built on real research
 
-We didn't guess at a single exercise. We read **19 published papers and reviews** (PubMed, PubMed Central and peer-reviewed journals), and every rule in the game traces back to one of them:
+Every exercise rule comes from **19 published papers and reviews** (PubMed, PubMed Central, peer-reviewed journals):
 
 - **Relaxing counts as much as squeezing.** In CP the biceps are often over-active, so letting go on cue is a skill ([EMG + VR study](https://content.iospress.com/articles/neurorehabilitation/nre1402)). The game never says "squeeze harder".
 - **Feedback fades.** Motor learning works best when feedback fades, so the meter hides itself every third rep once you're doing well ([MacIntosh 2019](https://www.em-consulte.com/article/1227431/article/biofeedback-intervention-effects-for-people-with-c), [JSLHR 2023](https://pubs.asha.org/doi/10.1044/2022_JSLHR-22-00375)).
