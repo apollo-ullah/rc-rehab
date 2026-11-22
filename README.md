@@ -1,6 +1,6 @@
 # RC-Rehab
 
-A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The first screen (`/`) asks which of the three modes you want:
+A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The link people get (`/`) opens the Arcade. The team's menu of all three modes is at `/team`, which nothing links to:
 
 - **Arcade** (`/arcade`): type a name, do the quick face setup and race the **Grand Prix** (head steers, a face move drives). Everyone races with **no driving help**, so times compare. The real RC car drives along through an ESP32 when it's connected. Times go on one **shared, saved leaderboard** (fastest and most improved) that anyone with the link sees, live. "Next player" clears everything for the next person, so it works on the event laptop and on anyone's own phone.
 - **Practice path** (`/path`, on anyone's own phone or computer): a **roadmap** of 24 stops: four units (head steady, left and right, jaw, lips) of five lessons and a boss race each, plus the Grand Prix. Every lesson is its own little **course**: the car drives itself to a gate, you do the exercise to open it, and the lesson ends when the car crosses the finish line. Progress is saved **in that browser only**, so coming back on the same phone picks up where you left off. Everything is open from day one; the path only suggests an order.
@@ -31,9 +31,9 @@ npx vercel deploy --prod                       # prints the app's link
 
 After a code change, run `npx vercel deploy --prod` again. The saved data stays. Connections that were already open stay on the old version until they reconnect (at most 5 minutes), so for a minute or two the old version may still be running the game.
 
-Live: **https://rc-rehab.vercel.app** (the old https://head-racer.vercel.app link still works). The first screen offers every mode.
+Live: **https://rc-rehab.vercel.app** (the old https://head-racer.vercel.app link still works). It opens the Arcade; `/team` shows every mode.
 
-- **Arcade:** `<link>/arcade` skips the choice (handy on the event laptop). Anyone you share the link with can race; there is one line for the one real car, so racers take turns.
+- **Arcade:** the plain link (or `<link>/arcade`). Anyone you share the link with can race; there is one line for the one real car, so racers take turns.
 - **Practice path:** `<link>/path` skips the choice.
 - **Arm path:** `<link>/arms` skips the choice.
 - **Arm sensors ESP32:** `firmware/emg_arms/emg_arms.ino`, block A, with `EMG_PATH "/api/emg?token=<CAR_TOKEN>"` (the same token as the car).
@@ -64,7 +64,7 @@ The quick-tunnel link changes every time you restart, but the QR code updates by
 
 Test without hardware: `npm test` (74 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, full races through the server with a fake phone and a fake car, and races carrying on when the connection blips or the game moves to another server).
 Test without a camera: on the phone, tap "Use touch controls instead". In lessons, slide sideways for left/right and drag up for face moves. On a laptop, the arrow keys / WASD also work.
-Demo without a face: open `<link>/?autopilot` (or `<link>/arcade?autopilot`) and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
+Demo without a face: open `<link>/path?autopilot` (or `<link>/?autopilot` for the Arcade) and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
 No real car? In the practice path, boss races and the Grand Prix have **Play on this phone**: the same race without the line or the car. It counts for practice and XP and is marked "(phone)" in the CSV, but stays off the leaderboard. Arcade races always go through the line, so they always count, with or without the car.
 
 ## ESP32 setup

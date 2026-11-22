@@ -118,7 +118,7 @@ biceps → EMG sensor (e.g. MyoWare, envelope output) → ESP32 → wss://…/ap
 
 ## Where it lives
 
-- `/arms` (third card on the first screen), name screen, then a **sensor check** screen:
+- `/arms` (third card on the team menu, `/team`), name screen, then a **sensor check** screen:
   both arms light up live, with steps "Squeeze left ✓ / Squeeze right ✓ / Relax both ✓",
   a "Swap left and right" switch and "Use keys or touch instead".
 - `public/path.js`: the 4 arm units (ids `a1`–`a4`) with their own lessons and knobs, in the

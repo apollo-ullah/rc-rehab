@@ -8,6 +8,7 @@
     { "source": "/arcade", "destination": "/" },
     { "source": "/path", "destination": "/" },
     { "source": "/arms", "destination": "/" },
+    { "source": "/team", "destination": "/" },
     { "source": "/qr.svg", "destination": "/api/qr" },
     { "source": "/api/practice.csv", "destination": "/api/practice" }
   ],
