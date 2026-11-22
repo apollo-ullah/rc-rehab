@@ -2,7 +2,7 @@
 // straight from the game page: both biceps' EMG readings come in about 50 times a second, and
 // power for the left and right wheel buttons goes out. Needs Chrome or Edge (laptop or Android)
 // on https:// or localhost. The same board and service as arm-lab's Free Flex.
-import { FlexSwitch, armProfile, Pulser } from './arms.js';
+import { FlexSwitch, armProfile } from './arms.js';
 
 const uuid = (s) => `e0730c${s}-b64d-48f3-a0ac-3d0657c85430`;
 const STALE_MS = 300; // no readings for this long = sensors offline
@@ -23,7 +23,6 @@ export const mc = {
   supported: typeof navigator !== 'undefined' && !!navigator.bluetooth,
   connected: false,
   name: '',
-  pwm: false, // newer firmware pulses the wheels on the board (smoother than pulsing over Bluetooth)
   adc: [0, 0], // latest envelope readings, left and right
   flex: [false, false],
   out: { l: 0, r: 0 }, // wheel power last sent
@@ -50,7 +49,7 @@ let writing = false;
 let timer = null;
 let want = { l: 0, r: 0, at: -Infinity };
 let test = null;
-const pulse = [new Pulser(), new Pulser()];
+
 const listeners = new Set();
 export const onChange = (fn) => listeners.add(fn);
 const changed = () => listeners.forEach((fn) => fn());
@@ -94,7 +93,6 @@ export async function connect() {
   device = dev;
   mc.connected = true;
   mc.name = dev.name || 'MuscleCar';
-  mc.pwm = !!powerCh;
   clearInterval(timer);
   timer = setInterval(tick, WRITE_MS);
   changed();
@@ -118,7 +116,7 @@ export function disconnect() {
   device?.gatt?.disconnect();
 }
 
-// Wheel power 0..1 for each side. Call it every frame: if the calls stop, the wheels stop.
+// Forward button state for each side. Call it every frame: if the calls stop, the wheels stop.
 export function setWheels(l, r) {
   want = { l, r, at: performance.now() };
 }
@@ -138,14 +136,11 @@ async function tick() {
     test = null;
     if (!document.hidden && now - want.at < WANT_MS) ({ l, r } = want);
   }
-  l = Math.max(0, Math.min(1, l));
-  r = Math.max(0, Math.min(1, r));
   mc.out = { l, r };
   writing = true;
   try {
-    if (trial?.onResult && maskCh) await maskCh.writeValueWithResponse(Uint8Array.of(3));
-    else if (powerCh) await powerCh.writeValueWithResponse(Uint8Array.of(Math.round(l * 255), Math.round(r * 255)));
-    else await maskCh.writeValueWithResponse(Uint8Array.of((pulse[0].next(l) ? 1 : 0) | (pulse[1].next(r) ? 2 : 0)));
+    if (maskCh) await maskCh.writeValueWithResponse(Uint8Array.of((l ? 1 : 0) | (r ? 2 : 0)));
+    else await powerCh.writeValueWithResponse(Uint8Array.of(l ? 255 : 0, r ? 255 : 0));
     trial?.onResult?.('ESP32 acknowledged the forward command.');
   } catch (err) {
     trial?.onResult?.('Wheel write failed: ' + err.message);

@@ -1,4 +1,4 @@
-import { newCar, step, autoSteer, realSteer, STAR_BONUS_MS, ASSIST, MAX_SPEED } from './game.js';
+import { newCar, step, autoSteer, realSteer, STAR_BONUS_MS, ASSIST } from './game.js';
 import { HeadTracker, buildCalibration, toIntent, toSignals, rangeFrom, rangeFromCalibration } from './head.js';
 import {
   UNITS, KINDS, GRAND_PRIX, XP, FACE_SIGS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode,
@@ -6,7 +6,7 @@ import {
   unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
   unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
-import { buildArmLesson, ArmRun, armRaceControl, wheelMix, CAR_TUNE, REAL_CAR, arcMotion, armsFor, armDir, ArmChord, LEFT_ARM_STEER } from './arms.js';
+import { buildArmLesson, ArmRun, armRaceControl, CAR_TUNE, armsFor, armDir, LEFT_ARM_STEER } from './arms.js';
 import { mc, connect as mcConnect, disconnect as mcDisconnect, setWheels, testWheels, record as mcRecord, calibrate as mcCalibrate, onChange as onMc } from './musclecar.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
@@ -55,7 +55,7 @@ const S = {
   armBtn: { l: false, r: false },
   armCheck: null,
   armRace: {},
-  tune: loadTune(), // the real car over Bluetooth: speed, turning, both-arms window
+  tune: loadTune(), // Bluetooth car preferences and game input timing
   cal: null,
   profile: null,
   level: 'gp', // which race: 'gp' or a unit id for that unit's boss race
@@ -1915,19 +1915,15 @@ $('ac-swap').onchange = (e) => {
   store.set('rc-arm-swap', S.armSwap ? '1' : '0');
 };
 // ---------- The real car over Bluetooth (MuscleCar) ----------
-// The real car copies what the game car actually does: how fast it really moves and how fast it
-// turns (after walls), turned into power for the left and right wheels (arms.js wheelMix).
+// Each bicep presses the forward button for its side.
 const bleDriving = () => ARMS && mc.connected && S.tune.follow && S.local;
 function mirrorRealCar() {
-  if (!mc.online) return setWheels(0, 0);
-  if (S.phase === 'demo') return setWheels(S.demo.w.l, S.demo.w.r);
-  let car = null;
-  if (ARMS && S.tune.follow) {
-    if (S.phase === 'racing' && S.local) car = S.car;
-    else if (S.phase === 'lesson' && S.lesson && !S.lesson.finishing) car = S.lesson.course.car;
-  }
-  const w = car ? wheelMix(car.vReal / MAX_SPEED, car.yawRate, S.tune) : { l: 0, r: 0 };
-  setWheels(w.l, w.r);
+  const racing = bleDriving() && S.phase === 'racing';
+  const lesson = ARMS && S.tune.follow && S.phase === 'lesson' && !S.lesson?.finishing;
+  if (!mc.ready || !(racing || lesson || S.phase === 'demo')) return setWheels(false, false);
+  const [l, r] = mc.flex;
+  if (S.armSwap !== S.tune.swapWheels) setWheels(r, l);
+  else setWheels(l, r);
 }
 const saveTune = () => store.set('rc-car-tune', JSON.stringify(S.tune));
 const mcHelp = (text) => ($('mc-help').textContent = text);
@@ -1949,16 +1945,9 @@ function renderMc() {
   $('mc-car').classList.toggle('hidden', !mc.connected);
   const t = S.tune;
   $('mc-follow').checked = t.follow;
-  $('mc-speed').value = Math.round(t.speed * 100);
-  $('mc-speed-v').textContent = `${Math.round(t.speed * 100)}% power · up to ${Math.round(t.speed * REAL_CAR.topCmS)} cm/s`;
-  $('mc-turn').value = Math.round(t.turn * 100);
-  $('mc-turn-v').textContent = `${Math.round(t.turn * 100)}%`;
   $('mc-chord').value = Math.round(t.chord * 1000);
   $('mc-chord-v').textContent = `${Math.round(t.chord * 1000)} ms`;
   $('mc-swapw').checked = t.swapWheels;
-  $('mc-fw').textContent = mc.pwm
-    ? 'This board pulses the wheel buttons itself, for smooth slow speeds.'
-    : 'This board can only press or release each wheel button, so the page pulses them over Bluetooth. Flash the latest firmware/MuscleCar for smoother slow speeds.';
   mountIcons($('btn-mc-connect'));
 }
 // Live readings on the sensor screen, a few times a second.
@@ -2031,15 +2020,11 @@ $('mc-swapw').onchange = (e) => {
   S.tune.swapWheels = e.target.checked;
   saveTune();
 };
-for (const [id, key, k] of [['mc-speed', 'speed', 100], ['mc-turn', 'turn', 100], ['mc-chord', 'chord', 1000]]) {
-  $(id).oninput = (e) => {
-    S.tune[key] = Number(e.target.value) / k;
-    saveTune();
-    renderMc();
-  };
-}
-// Test drives with the same numbers the game uses: full speed straight for 1 s, or the game's
-// one-arm curve for as long as the game car takes to turn 90°.
+$('mc-chord').oninput = (e) => {
+  S.tune.chord = Number(e.target.value) / 1000;
+  saveTune();
+  renderMc();
+};
 document.querySelector('.mc-tests').addEventListener('click', (e) => {
   const b = e.target.closest('[data-test]');
   if (!b || !mc.connected) return;
@@ -2047,21 +2032,15 @@ document.querySelector('.mc-tests').addEventListener('click', (e) => {
     const note = $('mc-test-note');
     note.textContent = 'Sending forward to both wheels…';
     testWheels(1, 1, 500, message => { note.textContent = message; });
-  } else if (b.dataset.test === 'fwd') {
-    const w = wheelMix(1, 0, S.tune);
-    testWheels(w.l, w.r, 1000);
-    $('mc-test-note').textContent = `Forward 1 s at ${Math.round(w.l * 100)}% power: about ${Math.round(w.l * REAL_CAR.topCmS)} cm.`;
   } else {
-    const a = arcMotion();
-    const w = wheelMix(a.speed, b.dataset.test === 'right' ? a.yaw : -a.yaw, S.tune);
-    const ms = (Math.PI / 2 / a.yaw) * 1000;
-    testWheels(w.l, w.r, ms);
-    $('mc-test-note').textContent = `Left wheels ${Math.round(w.l * 100)}%, right ${Math.round(w.r * 100)}% for ${(ms / 1000).toFixed(1)} s: it should turn about 90°. More? Lower Turning. Less? Raise it.`;
+    const direction = b.dataset.test;
+    const l = direction !== 'left', r = direction !== 'right';
+    testWheels(S.tune.swapWheels ? r : l, S.tune.swapWheels ? l : r, direction === 'fwd' ? 1000 : 500);
   }
 });
 
 // ---------- Demo mode: no game, the arms drive the real car directly ----------
-// Same mapping, both-arms window, speed and gentle turns as the game: both arms = forward,
+// Both arms = forward,
 // left arm = turn right, right arm = turn left, relaxed = stop.
 const DEMO_DIR = { fwd: 'Forward', right: 'Turning right', left: 'Turning left', none: 'Stopped' };
 let demoTextAt = 0;
@@ -2069,7 +2048,7 @@ function openDemo() {
   S.timers.forEach(clearTimeout);
   S.timers = [];
   S.phase = 'demo';
-  S.demo = { chord: new ArmChord(S.tune.chord), dir: '', w: { l: 0, r: 0 } };
+  S.demo = { dir: '' };
   show('s-demo');
   demoText();
 }
@@ -2079,14 +2058,9 @@ function leaveDemo() {
   S.phase = 'setup';
   show('s-name');
 }
-function demoFrame(sig, dt) {
+function demoFrame(sig) {
   const d = S.demo;
-  const dir = armDir(d.chord.update(sig.face && sig.l, sig.face && sig.r, dt));
-  const a = arcMotion();
-  d.w = dir === 'fwd' ? wheelMix(1, 0, S.tune)
-    : dir === 'right' ? wheelMix(a.speed, a.yaw, S.tune)
-    : dir === 'left' ? wheelMix(a.speed, -a.yaw, S.tune)
-    : { l: 0, r: 0 };
+  const dir = sig.face ? armDir(sig) : 'none';
   if (dir !== d.dir) {
     d.dir = dir;
     $('dm-dir').textContent = DEMO_DIR[dir];
@@ -2097,14 +2071,14 @@ function demoFrame(sig, dt) {
 }
 function demoText() {
   demoTextAt = performance.now();
-  const w = S.demo?.w || { l: 0, r: 0 };
+  const w = mc.out;
   $('dm-status').innerHTML = !mc.connected
     ? `<span class="lamp"></span>MuscleCar not connected${S.emg.online ? ' · WiFi arm sensors working' : ''}`
     : !mc.online ? '<span class="lamp"></span>MuscleCar connected, waiting for readings…'
     : !mc.calibrated ? '<span class="lamp"></span>MuscleCar connected · calibrate it in the settings'
     : `<span class="lamp on"></span>MuscleCar · left ${mc.adc[0]} · right ${mc.adc[1]}`;
   $('dm-power').textContent = mc.connected
-    ? `Left wheels ${Math.round(w.l * 100)}% · right wheels ${Math.round(w.r * 100)}%`
+    ? `Left wheels ${w.l ? "on" : "off"} · right wheels ${w.r ? "on" : "off"}`
     : 'No car connected: nothing is sent';
   $('btn-dm-connect').classList.toggle('hidden', mc.connected || !mc.supported);
 }
@@ -2161,7 +2135,7 @@ function frame(now) {
     if (held >= 1) $('btn-start').onclick();
   }
   if (S.phase === 'armcheck') armCheckFrame(sig, dt);
-  else if (S.phase === 'demo') demoFrame(sig, dt);
+  else if (S.phase === 'demo') demoFrame(sig);
   else if (S.phase === 'waiting' && S.mode === 'arms') armLights('w-arms', sig);
   if (inRace) raceFrame(dt, it, sig);
   if (inLesson) lessonFrame(dt, sig);
