@@ -3,25 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#140f1b" />
+  <meta name="theme-color" content="#f5f3fa" />
   <meta name="description" content="Short daily head and face exercises. Every lesson is its own little course that drives a real RC car." />
   <title>RC-Rehab</title>
   <link rel="icon" href="data:," />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Nunito:wght@500;600;700;800;900&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Geist:wght@400..700&family=Saira+Stencil+One&display=swap" />
   <link rel="stylesheet" href="style.css" />
   <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
 </head>
 <body>
   <canvas id="world" aria-hidden="true"></canvas>
+  <div class="notch" aria-hidden="true">RC</div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- 0. Choose a mode: only on the unlinked /team page (the team's menu). The front page is the Arcade. -->
   <section class="screen" id="s-choose">
-    <div class="panel sheet welcome">
-      <p class="hand tilt">welcome to</p>
+    <div class="hero">
       <h1 class="title">RC-Rehab</h1>
+      <p class="hand">Pick how you want to play</p>
+    </div>
+    <div class="panel sheet welcome">
       <p>Steer with your head and go with a face move, or train your arms with muscle sensors. A real RC car drives along with you. Pick how you want to play.</p>
       <nav class="modes" aria-label="Choose a mode">
         <a class="mode c-coral" href="/arcade">
@@ -56,9 +59,11 @@
 
   <!-- 1. Practice path: your name -->
   <section class="screen" id="s-name">
-    <div class="panel sheet welcome">
-      <p class="hand tilt" id="name-hand">practice path</p>
+    <div class="hero">
       <h1 class="title">RC-Rehab</h1>
+      <p class="hand" id="name-hand">practice path</p>
+    </div>
+    <div class="panel sheet welcome">
       <p id="name-intro">Short daily head and face exercises. Every lesson is its own little course: open each gate with your move, then drive on to the finish line.</p>
       <div class="field">
         <label for="name">Your name</label>
@@ -75,9 +80,11 @@
 
   <!-- 1b. Arcade: the event laptop. One person after another, Grand Prix times go on the leaderboard -->
   <section class="screen" id="s-arcade">
-    <div class="panel sheet welcome arcade">
-      <p class="hand tilt">arcade</p>
+    <div class="hero">
       <h1 class="title">RC-Rehab</h1>
+      <p class="hand">Arcade</p>
+    </div>
+    <div class="panel sheet welcome arcade">
       <p>Steer the Grand Prix with your head, go with a face move, and set the fastest time. Everyone drives at full speed with no help, so the times are fair. <span id="a-car"></span></p>
       <div class="field">
         <label for="a-name">Your name for the leaderboard</label>
@@ -204,7 +211,7 @@
   <!-- Arm path: check the two biceps sensors -->
   <section class="screen" id="s-arms">
     <div class="panel sheet">
-      <p class="hand tilt">arm path</p>
+      <p class="hand">arm path</p>
       <h2 class="title">Sensors and car</h2>
       <div class="mc-box">
         <p class="car-status" id="mc-status" role="status"></p>
@@ -245,7 +252,7 @@
   <section class="screen" id="s-demo">
     <div class="demo-wrap">
       <header class="demo-top">
-        <p class="hand tilt">demo mode</p>
+        <p class="hand">demo mode</p>
         <button class="btn small quiet" id="btn-dm-exit"><span data-icon="close">Exit</span></button>
       </header>
       <p class="car-status" id="dm-status" role="status"></p>
@@ -357,7 +364,7 @@
   <!-- 9. Your turn -->
   <section class="screen" id="s-turn">
     <div class="panel sheet">
-      <p class="hand tilt">it's your turn</p>
+      <p class="hand">it's your turn</p>
       <h1 class="title">Ready?</h1>
       <p id="turn-text">Find the real car, then keep your face in view of the camera.</p>
       <button class="btn primary huge" id="btn-start"><span data-icon="play">Start</span></button>

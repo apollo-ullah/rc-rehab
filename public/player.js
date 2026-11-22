@@ -1391,17 +1391,17 @@ function drawMinimapBase() {
     });
     g.closePath();
   };
-  g.strokeStyle = '#cfc5b3';
+  g.strokeStyle = 'rgba(106, 76, 245, 0.14)';
   g.lineWidth = 12;
   path();
   g.stroke();
-  g.strokeStyle = '#fbf6ec';
-  g.lineWidth = 7;
+  g.strokeStyle = '#221934';
+  g.lineWidth = 3;
   path();
   g.stroke();
   const f = t.pointAt(t.finishAt);
   const [fx, fy] = miniMap(f.x, f.y);
-  g.fillStyle = '#22303a';
+  g.fillStyle = '#6a4cf5';
   g.fillRect(fx - 5, fy - 5, 10, 10);
 }
 function drawMinimap(car) {
@@ -1411,17 +1411,17 @@ function drawMinimap(car) {
   S.track.stars.forEach((s, i) => {
     if (car.stars.includes(i)) return;
     const [x, y] = miniMap(s.x, s.y);
-    mctx.fillStyle = '#f2a922';
+    mctx.fillStyle = '#ffb22e';
     mctx.beginPath();
     mctx.arc(x, y, 3.4, 0, Math.PI * 2);
     mctx.fill();
   });
   const [cx, cy] = miniMap(car.x, car.y);
-  mctx.fillStyle = '#fff';
+  mctx.fillStyle = '#221934';
   mctx.beginPath();
   mctx.arc(cx, cy, 8, 0, Math.PI * 2);
   mctx.fill();
-  mctx.fillStyle = '#f26a4b';
+  mctx.fillStyle = '#f0468a';
   mctx.beginPath();
   mctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
   mctx.fill();

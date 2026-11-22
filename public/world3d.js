@@ -292,7 +292,7 @@ function softDot() {
   }));
 }
 function badgeTexture(text, color) {
-  const fam = document.fonts?.check?.('900 40px Nunito') ? 'Nunito' : 'system-ui, sans-serif';
+  const fam = document.fonts?.check?.('700 40px Geist') ? 'Geist' : 'system-ui, sans-serif';
   return canvasTex(128, 128, (g) => {
     g.fillStyle = '#ffffff';
     g.beginPath();
