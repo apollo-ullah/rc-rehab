@@ -70,7 +70,7 @@ const arena = createArena({
 const app = express();
 app.use(express.static(path.join(DIR, 'public')));
 app.get('/screen', (_req, res) => res.sendFile(path.join(DIR, 'public', 'screen.html')));
-app.get(['/arcade', '/path'], (_req, res) => res.sendFile(path.join(DIR, 'public', 'index.html')));
+app.get(['/arcade', '/path', '/arms'], (_req, res) => res.sendFile(path.join(DIR, 'public', 'index.html')));
 app.get('/qr.svg', (req, res) => {
   const svg = qrSvg(req.query.text);
   if (!svg) return res.status(400).end();

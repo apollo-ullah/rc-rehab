@@ -14,8 +14,9 @@ import { newCar, step, pointAt, ASSIST, STARS, TRACK_LENGTH, realSteer } from '.
 import { buildCalibration, toIntent, toSignals, rangeFrom } from '../public/head.js';
 import {
   UNITS, KINDS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode, recordLesson, recordBoss,
-  addPractice, weekView, progressLine, addDays, achievements, pathProgress, xpLevel,
+  addPractice, weekView, progressLine, addDays, achievements, pathProgress, xpLevel, unitsOf,
 } from '../public/path.js';
+import { buildArmLesson, ArmRun, armRaceControl } from '../public/arms.js';
 import { raceTrack, lessonTrack, selfIntersects, RACE_IDS, LESSON_GATES } from '../public/tracks.js';
 import { LessonCourse } from '../public/course.js';
 
@@ -138,7 +139,7 @@ for (let level = 0; level < ASSIST.length; level++) {
   const p = newProfile('Test', '2026-11-16');
   let allIdeal = true;
   let idleMisses = true;
-  for (let ui = 0; ui < UNITS.length; ui++) {
+  for (const { ui } of unitsOf('head')) {
     for (let li = 0; li < KINDS.length; li++) {
       const a = play(new LessonRun(buildLesson(p, ui, li), { axis: 'roll' }), 'ideal');
       if (a.good !== 10 || a.total !== 10) allIdeal = false;
@@ -256,7 +257,7 @@ for (let level = 0; level < ASSIST.length; level++) {
   const names = new Set();
   let all = true;
   let worst = '';
-  for (let ui = 0; ui < UNITS.length; ui++) {
+  for (const { ui } of unitsOf('head')) {
     for (let li = 0; li < KINDS.length; li++) {
       const t = lessonTrack(ui, li);
       names.add(t.name);
@@ -387,6 +388,87 @@ function idealSignals(w, v) {
   e.dispose();
 }
 
+// ---------- 3d. Arm path: two yes/no biceps signals ----------
+{
+  const arms = unitsOf('arms');
+  const dt = 1 / 60;
+  const play = (run, policy) => {
+    let t = 0;
+    while (!run.done && t < 400) {
+      run.update({ ...policy(run), face: true }, dt);
+      t += dt;
+    }
+    return { t, ...run.summary() };
+  };
+  let ideal = true;
+  let idle = true;
+  let ends = true;
+  let cheat = true;
+  for (const lv of [0, 9]) {
+    const p = newProfile('A', '2026-11-16');
+    for (const { u } of arms) lessonsOf(p, u.id).forEach((l) => (l.level = lv));
+    for (const { u, ui } of arms) {
+      for (let li = 0; li < 5; li++) {
+        const L = buildArmLesson(p, ui, li, { rng: mulberry(ui * 10 + li + lv) });
+        const a = play(new ArmRun(L, { rng: mulberry(5) }), (r) => r.want());
+        if (a.good !== 10 || a.total !== 10) {
+          ideal = false;
+          console.log(`   ${u.id} lesson ${li} level ${lv}: ideal ${a.good}/${a.total}`);
+        }
+        const b = play(new ArmRun(L, { rng: mulberry(6) }), () => ({ l: false, r: false }));
+        if (b.t >= 400) ends = false;
+        if (li < 4 && u.lessons[li].key !== 'loose' && b.good > 0) idle = false;
+        if (['swap', 'which'].includes(u.lessons[li].key) && play(new ArmRun(L, { rng: mulberry(7) }), () => ({ l: true, r: true })).good > 0) cheat = false;
+      }
+    }
+  }
+  check(ideal, 'Arm path: all 20 arm lessons can be completed 10/10, at the easiest and hardest levels');
+  check(idle && ends, 'Arm path: never flexing scores nothing (except "Stay loose"), and every lesson still ends');
+  check(cheat, 'Arm path: flexing both arms all the time scores nothing on "Switch" and "Which arm?"');
+  const lostRun = new ArmRun(buildArmLesson(newProfile('L', '2026-11-16'), arms[0].ui, 0, { rng: mulberry(2) }), { rng: mulberry(3) });
+  for (let i = 0; i < 600; i++) lostRun.update({ l: true, r: false, face: false }, dt);
+  check(lostRun.results.length === 0 && lostRun.lostMs > 9000, 'Arm path: a dropped sensor pauses the lesson instead of scoring misses');
+
+  // Every arm lesson course, driven gate by gate with an ideal player.
+  const names = new Set(unitsOf('head').flatMap(({ ui }) => [0, 1, 2, 3, 4].map((li) => lessonTrack(ui, li).name)));
+  let all = true;
+  for (const { ui } of arms) {
+    for (let li = 0; li < 5; li++) {
+      const t = lessonTrack(ui, li);
+      names.add(t.name);
+      const run = new ArmRun(buildArmLesson(newProfile('C', '2026-11-16'), ui, li, { rng: mulberry(ui + li) }), { rng: mulberry(9) });
+      const c = new LessonCourse(t, run);
+      let time = 0;
+      let opened = 0;
+      while (c.mode !== 'done' && time < 300) {
+        if (c.update({ ...run.want(), face: true }, dt).gateEvent?.ok) opened++;
+        time += dt;
+      }
+      if (c.mode !== 'done' || opened !== LESSON_GATES || !c.car.finished) {
+        all = false;
+        console.log(`   ${t.id}: mode ${c.mode} opened ${opened} time ${time.toFixed(1)}`);
+      }
+    }
+  }
+  check(all && names.size === 40, `Arm path: all 20 arm courses driven to the finish, every gate opened, 40 different course names (${names.size})`);
+
+  // Boss races: what each pair of signals does to the car.
+  const on = (l, r) => ({ l, r, face: true });
+  const a4 = [on(true, true), on(true, false), on(false, true), on(false, false)].map((s) => armRaceControl('a4', s, {}, dt, 0));
+  check(a4[0].go === 1 && a4[0].steer === 0 && a4[1].steer === -1 && a4[2].steer === 1 && a4[3].go === 0, 'Arm Grand Prix: both arms = full speed, one arm steers that way, none = stop');
+  const st3 = {};
+  let boosts = 0;
+  for (let i = 0; i < 480; i++) if (armRaceControl('a3', on(Math.floor(i / 60) % 2 === 0, false), st3, dt, 0).boost) boosts++; // 1 s up, 1 s down
+  const st3b = {};
+  let held = 0;
+  for (let i = 0; i < 240; i++) if (armRaceControl('a3', on(true, false), st3b, dt, 0).boost) held++;
+  check(boosts === 4 && held === 1, `Pump Track: each new squeeze boosts (${boosts} for 4 curls), holding doesn't (${held})`);
+  const st2 = {};
+  let b2 = 0;
+  for (let i = 0; i < 400; i++) if (armRaceControl('a2', on(true, false), st2, dt, 0).boost) b2++;
+  check(b2 === 2 && armRaceControl('a2', on(false, false), st2, dt, 0).go === 0, `Long Haul: a boost every 3 s held (${b2} in 6.7 s), stops when you let go`);
+}
+
 // ---------- 4. Server ----------
 // SIM_URL=http://localhost:4001 runs these checks against a server that is already running, e.g. the
 // cloud build (test/cloud-dev.js) with CAR_TOKEN=letsgo, ADMIN_KEY=testkey and an empty Redis.
@@ -435,6 +517,24 @@ try {
   screen.ws.send(JSON.stringify({ t: 'hello', role: 'screen', admin: ADMIN }));
   check(!!(await screen.until((s) => isT('hello')(s) && JSON.parse(s).admin === true)), 'Big screen gets host controls with the admin key');
   check(!!(await screen.until((s) => isT('lobby')(s) && JSON.parse(s).carOnline)), 'Big screen sees the car online');
+
+  // Arm sensors: their ESP32 sends "f <left> <right>"; players in the arm path get the two signals.
+  const armPhone = client(`${wsBase}/api/ws`);
+  await armPhone.open;
+  armPhone.ws.send(JSON.stringify({ t: 'hello', role: 'player' }));
+  armPhone.ws.send(JSON.stringify({ t: 'emg_sub' }));
+  const emgIs = (l, r, online) => (s) => isT('emg')(s) && JSON.parse(s).online === online && (!online || (JSON.parse(s).l === l && JSON.parse(s).r === r));
+  check(!!(await armPhone.until(emgIs(0, 0, false))), 'Arm path player is told the arm sensors are offline');
+  const emgDev = client(`${wsBase2}/api/emg?token=${CAR}`);
+  await emgDev.open;
+  emgDev.ws.send('f 1 0');
+  check(!!(await armPhone.until(emgIs(1, 0, true))), 'Left biceps flex from the sensor ESP32 reaches the phone');
+  car.ws.send('f 0 1');
+  check(!!(await armPhone.until(emgIs(0, 1, true))), "The car's own ESP32 can send the arm signals too");
+  armPhone.inbox.length = 0;
+  emgDev.ws.close();
+  check(!!(await armPhone.until(emgIs(0, 0, false))), 'Arm sensors show offline when their ESP32 disconnects');
+  armPhone.ws.close();
 
   const phone = client(`${wsBase}/api/ws`);
   await phone.open;

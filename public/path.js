@@ -23,34 +23,112 @@ export const KINDS = [
 
 export const UNITS = [
   {
-    id: 'u1', section: 'Head', title: 'Hold steady', color: 'sky',
+    id: 'u1', path: 'head', section: 'Head', title: 'Hold steady', color: 'sky',
     move: 'Keep your head in the middle and still',
     why: 'The base of head control: sitting up, eye contact, and using any head-operated device.',
     moves: [['still', 0]],
     boss: { name: 'Steady Run', how: 'The car drives while your head stays in the middle. It steers itself.' },
   },
   {
-    id: 'u2', section: 'Head', title: 'Left and right', color: 'mint',
+    id: 'u2', path: 'head', section: 'Head', title: 'Left and right', color: 'mint',
     move: 'Turn or tilt your head to each side',
     why: 'Looking around. Power wheelchair head arrays have a pad on each side of the head.',
     moves: [['side', -1], ['side', 1]],
     boss: { name: 'Curvy Road', how: 'You steer with your head. The car drives forward by itself.' },
   },
   {
-    id: 'u3', section: 'Mouth and face', title: 'Open and close', color: 'tomato',
+    id: 'u3', path: 'head', section: 'Mouth and face', title: 'Open and close', color: 'tomato',
     move: 'Open and close your jaw',
     why: 'Graded control: half open versus fully open.',
     moves: [['jaw', 1]],
     boss: { name: 'Mouth Pedal', how: 'Open your mouth to go. Wider is faster. The car steers itself.' },
   },
   {
-    id: 'u4', section: 'Mouth and face', title: 'Lips', color: 'sun',
+    id: 'u4', path: 'head', section: 'Mouth and face', title: 'Lips', color: 'sun',
     move: 'Pucker and smile',
     why: 'Lip control and lip seal.',
     moves: [['pucker', 1], ['smile', 1]],
     boss: { name: 'Kiss Boost', how: 'The car rolls along by itself. Pucker your lips to boost.' },
   },
 ];
+// ---------- The arm path: two EMG sensors, one on each biceps, each saying only "flexing or not" ----------
+// See docs/arm-path.md for the research behind it. Every unit has its own five lessons (instead of
+// the head path's shared Find/Hold/Aim/Quick/Mix); each lesson has one difficulty knob.
+const ARM_TEXT = {
+  hold: ['holds get 1 second longer.', 'holds get 1 second shorter.'],
+  quick: ['a little less time to react.', 'more time to react.'],
+  relax: ['a little less time to relax.', 'more time to relax.'],
+  window: ['the timing window gets a little smaller.', 'the timing window gets bigger.'],
+};
+const L = (key, title, what, max, value, text, change) => ({ key, title, short: title, what, knob: { max, value }, text, change });
+const MIX = L('mix', 'Mix', 'Everything from this unit in random order, plus a review from the unit before.', 0, () => 0, () => 'A bit of everything');
+export const ARM_UNITS = [
+  {
+    id: 'a1', path: 'arms', section: 'Arms', title: 'Wake up', color: 'coral',
+    move: 'Switch each biceps on and off when asked',
+    why: 'The base of every other arm skill, and of using any muscle switch.',
+    moves: [['arm', 'l'], ['arm', 'r']],
+    lessons: [
+      L('squeeze', 'Squeeze', 'Squeeze the arm that lights up and keep it on for a moment.', 6, (lv) => 0.5 + 0.25 * lv, (v) => `Keep it on ${v} s`, ['squeezes last a little longer.', 'squeezes get a little shorter.']),
+      L('release', 'Let go', 'Squeeze, then relax fully as soon as it says "Let go!", and stay relaxed.', 6, (lv) => Math.round((3 - 0.33 * lv) * 10) / 10, (v) => `${v} s to relax`, ARM_TEXT.relax),
+      L('hold', 'Hold', 'Keep a squeeze on. Letting go pauses the clock; it never resets it.', 4, (lv) => 2 + lv, (v) => `Hold ${v} s`, ARM_TEXT.hold),
+      L('quick', 'Quick', 'Wait for the cue, then squeeze as fast as you can. Squeezing early just restarts the wait.', 7, (lv) => Math.max(0.8, 2.5 - 0.25 * lv), (v) => `${v.toFixed(1)} s to react`, ARM_TEXT.quick),
+      MIX,
+    ],
+    boss: { name: 'Flex Sprint', how: 'Squeeze either arm to drive. The car steers itself.' },
+  },
+  {
+    id: 'a2', path: 'arms', section: 'Arms', title: 'Hold strong', color: 'sky',
+    move: 'Hold a squeeze steady, then let it go on cue',
+    why: 'Endurance for carrying and holding things, and letting go when you mean to.',
+    moves: [['arm', 'l'], ['arm', 'r']],
+    lessons: [
+      L('longhold', 'Long hold', 'Keep one arm squeezed. Holds grow as you improve.', 9, (lv) => 3 + lv, (v) => `Hold ${v} s`, ARM_TEXT.hold),
+      L('holdgo', 'Hold, then let go', 'Hold a squeeze, then relax within 1.5 s when it says "Let go!".', 6, (lv) => 2 + lv, (v) => `Hold ${v} s, then let go`, ARM_TEXT.hold),
+      L('bothhold', 'Both arms hold', 'Squeeze both arms and keep them on.', 6, (lv) => 2 + lv, (v) => `Hold both ${v} s`, ARM_TEXT.hold),
+      L('loose', 'Stay loose', 'Keep both arms relaxed. Good practice for arms that tighten up by themselves.', 7, (lv) => 3 + lv, (v) => `Relaxed for ${v} s`, ['relaxed stretches get 1 second longer.', 'relaxed stretches get 1 second shorter.']),
+      MIX,
+    ],
+    boss: { name: 'Long Haul', how: 'The car only moves while you hold a squeeze, and every 3 seconds held gives a boost. It steers itself.' },
+  },
+  {
+    id: 'a3', path: 'arms', section: 'Arms', title: 'Curls', color: 'sun',
+    move: 'Curl reps at a steady tempo: up, hold, down',
+    why: 'A set of biceps curls, the way strength training is done: slow reps with rest in between.',
+    moves: [['arm', 'l'], ['arm', 'r']],
+    lessons: [
+      L('curl', 'Up and down', 'On "Up!" squeeze and keep it up for 2 s. On "Down" relax and stay down for 2 s.', 5, (lv) => Math.max(0.5, 1.2 - 0.14 * lv), (v) => `${v.toFixed(1)} s timing window`, ARM_TEXT.window),
+      L('pause', 'Pause at the top', 'Curls with a longer squeeze at the top.', 3, (lv) => 2 + lv, (v) => `${v} s at the top`, ['the pause at the top gets 1 second longer.', 'the pause at the top gets shorter.']),
+      L('bothcurl', 'Both arms', 'Curls with both arms together.', 5, (lv) => Math.max(0.5, 1.2 - 0.14 * lv), (v) => `${v.toFixed(1)} s timing window`, ARM_TEXT.window),
+      L('fastup', 'Fast up', 'On "Up!" squeeze as fast as you can and hold 1 s, then relax.', 7, (lv) => Math.max(0.8, 2.5 - 0.25 * lv), (v) => `${v.toFixed(1)} s to react`, ARM_TEXT.quick),
+      MIX,
+    ],
+    boss: { name: 'Pump Track', how: 'The car rolls by itself. Every new squeeze (let go, then squeeze again) gives a boost.' },
+  },
+  {
+    id: 'a4', path: 'arms', section: 'Arms', title: 'Left and right', color: 'mint',
+    move: 'Use one arm without the other, switch, and work together',
+    why: 'Choosing which arm moves. Two muscle switches like these can drive a wheelchair or a toy.',
+    moves: [['arm', 'l'], ['arm', 'r']],
+    lessons: [
+      L('solo', 'Just one', 'Squeeze the named arm while the other stays relaxed. At first the other arm may join in for a while.', 4, (lv) => Math.max(0, 1 - 0.25 * lv), (v) => (v ? `Other arm may join for ${v} s` : 'Other arm stays relaxed'), ['the other arm gets a little less time to join in.', 'the other arm gets more time to join in.']),
+      L('swap', 'Switch', 'Squeeze one arm, let go, then squeeze the other.', 6, (lv) => Math.max(2.5, 6 - 0.6 * lv), (v) => `${v.toFixed(1)} s to switch`, ['a little less time to switch.', 'more time to switch.']),
+      L('together', 'Together', 'Squeeze both arms at the same moment, then hold for 1 s.', 5, (lv) => Math.max(0.25, 0.8 - 0.11 * lv), (v) => `Within ${v.toFixed(2)} s of each other`, ARM_TEXT.window),
+      L('which', 'Which arm?', 'A random arm is named: squeeze that one fast, and not the other.', 7, (lv) => Math.max(0.8, 2.5 - 0.25 * lv), (v) => `${v.toFixed(1)} s to react`, ARM_TEXT.quick),
+      MIX,
+    ],
+    boss: { name: 'Arm Grand Prix', how: 'You steer: left arm turns left, right arm turns right, both drive straight at full speed. Neither slows down.' },
+  },
+];
+UNITS.push(...ARM_UNITS);
+export const pathOf = (u) => u?.path || 'head';
+// [{ u, ui }] for one path, with ui the index in UNITS.
+export const unitsOf = (path) => UNITS.map((u, ui) => ({ u, ui })).filter((x) => pathOf(x.u) === path);
+// A unit's number within its own path (1-4).
+export const unitNo = (ui) => unitsOf(pathOf(UNITS[ui])).findIndex((x) => x.ui === ui) + 1;
+// The lesson at position li of a unit: the arm path's own lessons, or the shared head-path kinds.
+export const lessonInfo = (ui, li) => UNITS[ui]?.lessons?.[li] ?? KINDS[li];
+
 export const GRAND_PRIX = { id: 'gp', name: 'Grand Prix', how: 'Your head steers and your GO move drives. Full course, full leaderboard.' };
 export const LEVELS = ['gp', ...UNITS.map((u) => u.id)];
 export const unitIndex = (id) => UNITS.findIndex((u) => u.id === id);
@@ -73,7 +151,8 @@ const STILL_KNOB = {
   quick: { max: 8, value: (lv) => Math.max(1, 3 - 0.25 * lv) },
   mix: { max: 0, value: () => 0 },
 };
-export const knobFor = (unitId, kind) => (unitId === 'u1' ? STILL_KNOB : KNOB)[kind];
+export const knobFor = (unitId, kind) =>
+  UNITS[unitIndex(unitId)]?.lessons?.find((l) => l.key === kind)?.knob ?? (unitId === 'u1' ? STILL_KNOB : KNOB)[kind];
 
 const CHANGE_TEXT = {
   find: ['targets move a little further out.', 'targets come in a little.'],
@@ -89,6 +168,8 @@ const STILL_CHANGE = {
 };
 
 export function difficultyText(unitId, kind, level) {
+  const arm = UNITS[unitIndex(unitId)]?.lessons?.find((l) => l.key === kind);
+  if (arm) return arm.text(arm.knob.value(level));
   const v = knobFor(unitId, kind).value(level);
   if (unitId === 'u1') {
     return {
@@ -169,7 +250,7 @@ export function buildLesson(p, ui, li, { verb = 'Turn', rng = Math.random, wide 
     let uid = unit.id;
     let mv = order[i];
     if (kind === 'mix') {
-      if (ui > 0 && (i === 3 || i === 7)) {
+      if (ui > 0 && pathOf(UNITS[ui - 1]) === pathOf(unit) && (i === 3 || i === 7)) {
         // Spaced review: a rep from the unit before.
         uid = UNITS[ui - 1].id;
         k = 'find';
@@ -541,20 +622,21 @@ export function achievements(p, day = localDay()) {
   const sum = (f) => days.reduce((a, d) => a + (f(d) || 0), 0);
   const all = UNITS.flatMap((u) => lessonsOf(p, u.id));
   const c = counts(p);
-  const bosses = UNITS.filter((u) => p.bosses[u.id]?.cleared).length;
-  const tried = UNITS.filter((u) => lessonsOf(p, u.id).some((l) => l.plays > 0)).length;
-  const pp = pathProgress(p);
+  const HEAD = UNITS.filter((u) => pathOf(u) === 'head'); // the head path's own goals
+  const bosses = HEAD.filter((u) => p.bosses[u.id]?.cleared).length;
+  const tried = HEAD.filter((u) => lessonsOf(p, u.id).some((l) => l.plays > 0)).length;
+  const pp = pathProgress(p, 'head');
   const list = [
     ['first', 'First gate', 'Open your first gate with a good rep.', sum((d) => d.good), 1],
     ['warmup', 'Warmed up', 'Finish your first lesson.', all.filter((l) => l.done).length, 1],
-    ['explorer', 'Explorer', 'Play a lesson in every unit.', tried, UNITS.length],
+    ['explorer', 'Explorer', 'Play a lesson in every unit.', tried, HEAD.length],
     ['perfect', 'Perfect ten', 'Open all 10 gates in one lesson.', c.perfect, 1],
     ['rest', 'Good call', 'Stop with "I\'m tired" when you need a rest.', c.tired, 1],
     ['gates', 'Gatekeeper', 'Open 100 gates.', sum((d) => d.good), 100],
     ['goal', 'Goal getter', 'Hit your daily goal on 5 days.', days.filter((d) => d.goalMet).length, 5],
     ['streak', 'On a roll', 'Keep a 2-week streak going.', weekView(p, day).streak, 2],
     ['gold', 'Golden', 'Turn 5 lessons gold.', all.filter(isGold).length, 5],
-    ['boss', 'Boss hunter', 'Clear all four boss races.', bosses, UNITS.length],
+    ['boss', 'Boss hunter', 'Clear all four boss races.', bosses, HEAD.length],
     ['gp', 'Racer', 'Finish the Grand Prix.', c.gp, 1],
     ['hour', 'Long haul', 'Practise for 60 minutes in total.', Math.floor(sum((d) => d.ms) / 60000), 60],
     ['map', 'Whole map', 'Finish every stop on the roadmap.', pp.done, pp.total],
@@ -594,8 +676,8 @@ export const isGold = (l) => l.goodDays.length >= 2;
 export const unitOpen = () => true;
 
 // Path order: unit by unit, the five lessons then the boss race.
-export function nextNode(p) {
-  for (let ui = 0; ui < UNITS.length; ui++) {
+export function nextNode(p, path = 'head') {
+  for (const { ui } of unitsOf(path)) {
     const L = lessonsOf(p, UNITS[ui].id);
     for (let li = 0; li < 5; li++) if (!L[li].done) return { ui, li };
     if (!p.bosses[UNITS[ui].id]?.cleared) return { ui, li: 5 };
@@ -612,7 +694,7 @@ export function nodeState(p, ui, li) {
     if (isGold(l)) return 'gold';
     if (l.done) return 'done';
   }
-  const nx = nextNode(p);
+  const nx = nextNode(p, pathOf(UNITS[ui]));
   return nx && nx.ui === ui && nx.li === li ? 'next' : 'open';
 }
 
@@ -622,15 +704,16 @@ export function unitProgress(p, ui) {
   const done = L.filter((l) => l.done).length + (p.bosses[UNITS[ui].id]?.cleared ? 1 : 0);
   return { done, gold: L.filter(isGold).length, total: 6 };
 }
-export function pathProgress(p) {
+export function pathProgress(p, path = 'head') {
   let done = 0;
   let gold = 0;
-  UNITS.forEach((_, ui) => {
+  const list = unitsOf(path);
+  list.forEach(({ ui }) => {
     const u = unitProgress(p, ui);
     done += u.done;
     gold += u.gold;
   });
-  return { done, gold, total: UNITS.length * 6 };
+  return { done, gold, total: list.length * 6 };
 }
 
 // Player level from XP: 50, 150, 300, 500… XP (a lesson is worth about 25).
@@ -676,7 +759,8 @@ function recordPeak(p, key, v, day) {
 // summary: LessonRun.summary() plus { ms, tired }
 export function recordLesson(p, ui, li, sum, day = localDay()) {
   const unit = UNITS[ui];
-  const kind = KINDS[li].key;
+  const info = lessonInfo(ui, li);
+  const kind = info.key;
   const l = lessonsOf(p, unit.id)[li];
   const knob = knobFor(unit.id, kind);
   const before = l.level;
@@ -701,11 +785,11 @@ export function recordLesson(p, ui, li, sum, day = localDay()) {
   if (perfect) counts(p).perfect++;
   if (sum.tired) counts(p).tired++;
   const goalJustMet = addPractice(p, day, { ms: sum.ms || 0, xp, good: sum.good, reps: sum.total });
-  const texts = unit.id === 'u1' ? STILL_CHANGE : CHANGE_TEXT;
+  const texts = info.change || (unit.id === 'u1' ? STILL_CHANGE : CHANGE_TEXT)[kind];
   let text = '';
   if (knob.max > 0) {
-    if (change === 'up') text = `Next time: ${texts[kind][0]}`;
-    else if (change === 'down') text = `Next time: ${texts[kind][1]}`;
+    if (change === 'up') text = `Next time: ${texts[0]}`;
+    else if (change === 'down') text = `Next time: ${texts[1]}`;
     else if (l.level === knob.max) text = "You're at the top level for this lesson.";
     else text = 'Next time: same level, to lock it in.';
   }
@@ -724,7 +808,8 @@ export function recordBoss(p, level, { ms = 0, finished = true } = {}, day = loc
   const xp = finished ? (ui >= 0 ? XP.boss : XP.gp) : 0;
   if (finished && ui < 0) counts(p).gp++;
   const goalJustMet = addPractice(p, day, { ms, xp });
-  return { xp, goalJustMet, firstClear, nextUp: firstClear && UNITS[ui + 1] ? UNITS[ui + 1].title : null };
+  const next = UNITS[ui + 1];
+  return { xp, goalJustMet, firstClear, nextUp: firstClear && next && pathOf(next) === pathOf(UNITS[ui]) ? next.title : null };
 }
 
 export function todayView(p, day = localDay()) {

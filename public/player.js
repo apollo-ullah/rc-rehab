@@ -4,7 +4,9 @@ import {
   UNITS, KINDS, GRAND_PRIX, XP, FACE_SIGS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode,
   isGold, difficultyText, recordLesson, recordBoss, addPractice, todayView, weekView, progressLine, levelName,
   unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
+  unitsOf, unitNo, lessonInfo, pathOf,
 } from './path.js';
+import { buildArmLesson, ArmRun, armRaceControl } from './arms.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
 import { mountIcons, iconSvg } from './icons.js';
@@ -16,12 +18,16 @@ const AUTOPILOT = new URLSearchParams(location.search).has('autopilot');
 // Practice path (/path): your own roadmap of lessons, saved in this browser.
 const ARCADE = /^\/arcade\/?$/.test(location.pathname) || new URLSearchParams(location.search).has('arcade');
 const PATH = /^\/path\/?$/.test(location.pathname);
+// Arm path (/arms): biceps lessons from two EMG sensors that only say "flexing or not" (docs/arm-path.md).
+const ARMS = /^\/arms\/?$/.test(location.pathname);
+const PATHID = ARMS ? 'arms' : 'head';
 const video = $('cam');
 const tracker = new HeadTracker(video);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const COLOR_CLASS = ['c-sky', 'c-mint', 'c-coral', 'c-sun'];
+const cc = (ui) => COLOR_CLASS[ui] ?? `c-${UNITS[ui].color}`;
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const store = {
@@ -34,7 +40,13 @@ const S = {
   name: store.get('rc-name') || '',
   assist: 0,
   sens: store.get('rc-sens') || 'normal',
-  mode: 'head', // 'head' | 'touch'
+  mode: ARMS ? 'arms' : 'head', // 'head' | 'touch' | 'arms'
+  emg: { l: 0, r: 0, online: false }, // the arm sensors, from the server
+  armManual: false, // no sensor: A/D keys or the on-screen Left/Right buttons
+  armSwap: store.get('rc-arm-swap') === '1',
+  armBtn: { l: false, r: false },
+  armCheck: null,
+  armRace: {},
   cal: null,
   profile: null,
   level: 'gp', // which race: 'gp' or a unit id for that unit's boss race
@@ -117,8 +129,10 @@ function show(id) {
     video.play().catch(() => {});
   }
   const touch = S.mode === 'touch';
-  $('cam-slot-race').classList.toggle('hidden', touch);
-  $('cam-slot-lesson').classList.toggle('hidden', touch);
+  const arms = S.mode === 'arms';
+  $('cam-slot-race').classList.toggle('hidden', S.mode !== 'head');
+  $('cam-slot-lesson').classList.toggle('hidden', S.mode !== 'head');
+  for (const id of ['r-arms', 'l-arms', 'w-arms']) $(id).classList.toggle('hidden', !arms);
   $('touch-pad').classList.toggle('hidden', !touch);
   $('touch-pad-lesson').classList.toggle('hidden', !touch);
 }
@@ -198,6 +212,7 @@ const sendSure = (m) => (ws?.readyState === 1 ? send(m) : pending.push(m));
 function onHello(m) {
   clearTimeout(lostTimer);
   while (pending.length) send(pending.shift());
+  if (ARMS) send({ t: 'emg_sub' });
   if (S.local) return;
   if (S.phase === 'waiting' && S.queued) return joinQueue();
   if (S.phase === 'turn' && !m.driving) return goWait(); // the turn was lost while away: back in line
@@ -219,6 +234,12 @@ function onMessage(m) {
       freshMs = m.freshMs || 0;
       onHello(m);
       break;
+    case 'emg': {
+      const was = S.emg.online;
+      S.emg = { l: m.l ? 1 : 0, r: m.r ? 1 : 0, online: !!m.online };
+      if (was !== S.emg.online && S.phase === 'home') toast(S.emg.online ? 'Arm sensor connected' : 'Arm sensor offline', { icon: 'arm' });
+      break;
+    }
     case 'board':
       S.board = { fastest: m.fastest || [], improved: m.improved || [] };
       if (ARCADE && S.phase === 'home') renderArcade();
@@ -360,6 +381,7 @@ $('btn-name').onclick = () => {
   store.set('rc-name', name);
   loadProfile(name);
   saveProfile(); // this browser remembers you from the first visit
+  if (ARMS) return S.armCheck?.done || S.armManual ? goHome() : openArmCheck();
   if (S.mode === 'touch' || (tracker.lm && S.cal)) return goHome();
   show('s-camera');
 };
@@ -507,8 +529,8 @@ function goHome() {
   clearInterval(S.restTimer);
   renderHome();
   show('s-home');
-  const nx = nextNode(S.profile);
-  scene(nx ? stopTrack(nx.ui, nx.li) : raceTrack('gp'), 'preview', 0.64);
+  const nx = nextNode(S.profile, PATHID);
+  scene(nx ? stopTrack(nx.ui, nx.li) : raceTrack(ARMS ? 'a4' : 'gp'), 'preview', 0.64);
   world?.reset();
 }
 $('home-scroll').addEventListener('scroll', () => {
@@ -540,7 +562,7 @@ function stopInfo(p, ui, li) {
   }
   const l = lessonsOf(p, u.id)[li];
   const meta = isGold(l) ? `Gold · level ${l.level + 1}` : l.plays ? `Level ${l.level + 1} · last ${Math.round((l.lastRate || 0) * 10)}/10` : 'Not played yet';
-  return { st, title: KINDS[li].title, sub: lessonTrack(ui, li).name, meta };
+  return { st, title: lessonInfo(ui, li).title, sub: lessonTrack(ui, li).name, meta };
 }
 
 function diamond(st, { boss = false, num = '', icon = null } = {}) {
@@ -564,20 +586,29 @@ function renderHome() {
   $('h-streak').textContent = `${wv.streak} wk`;
 
   // Up next
-  const nx = nextNode(p);
+  const nx = nextNode(p, PATHID);
   const card = document.querySelector('#s-home .up-next');
-  card.className = `panel up-next ${nx ? COLOR_CLASS[nx.ui] : 'c-violet'}`;
+  card.className = `panel up-next ${nx ? cc(nx.ui) : 'c-violet'}`;
   if (nx) {
     const u = UNITS[nx.ui];
     const t = stopTrack(nx.ui, nx.li);
-    $('h-next-unit').textContent = `Unit ${nx.ui + 1} · ${u.title}`;
-    $('h-next-title').textContent = nx.li === 5 ? `Boss race: ${u.boss.name}` : KINDS[nx.li].title;
+    $('h-next-unit').textContent = `${ARMS ? 'Arm unit' : 'Unit'} ${unitNo(nx.ui)} · ${u.title}`;
+    $('h-next-title').textContent = nx.li === 5 ? `Boss race: ${u.boss.name}` : lessonInfo(nx.ui, nx.li).title;
     $('h-next-course').innerHTML = `${iconSvg('map')}<span>${esc(t.name)} · ${nx.li === 5 ? 'a race on the real car' : `${LESSON_GATES} gates, about 2 minutes`}</span>`;
-    $('h-next-what').textContent = nx.li === 5 ? u.boss.how : KINDS[nx.li].what;
+    $('h-next-what').textContent = nx.li === 5 ? u.boss.how : lessonInfo(nx.ui, nx.li).what;
     $('h-next-tag').textContent = p.xp ? 'up next' : 'start here';
     $('h-hero-note').textContent = t.name.toLowerCase();
     $('btn-continue').innerHTML = `<span data-icon="play">${nx.li === 5 ? 'See the race' : 'Start'}</span>`;
-    $('btn-gp').classList.remove('hidden');
+    $('btn-gp').classList.toggle('hidden', ARMS);
+  } else if (ARMS) {
+    $('h-next-unit').textContent = 'Arm path';
+    $('h-next-title').textContent = 'Every stop is done!';
+    $('h-next-course').innerHTML = `${iconSvg('trophy')}<span>Replay anything, or race the Arm Grand Prix</span>`;
+    $('h-next-what').textContent = 'Keep your arms in practice: a few lessons every other day.';
+    $('h-next-tag').textContent = 'well done';
+    $('h-hero-note').textContent = 'arm grand prix';
+    $('btn-continue').innerHTML = '<span data-icon="trophy">Race the Arm Grand Prix</span>';
+    $('btn-gp').classList.add('hidden');
   } else {
     $('h-next-unit').textContent = 'Together';
     $('h-next-title').textContent = 'Every stop is done!';
@@ -597,7 +628,7 @@ function renderHome() {
   $('h-streak-text').textContent = streakText(wv);
 
   // Roadmap
-  const pp = pathProgress(p);
+  const pp = pathProgress(p, PATHID);
   $('h-map-count').textContent = `${pp.done} / ${pp.total} stops${pp.gold ? ` · ${pp.gold} gold` : ''}`;
   fillBar('h-map-bar', pp.done / pp.total);
   const line = progressLine(p);
@@ -605,13 +636,14 @@ function renderHome() {
   $('h-progress').classList.toggle('hidden', !line);
 
   const gpCount = p.counts?.gp || 0;
-  $('h-unit-tabs').innerHTML = UNITS.map((u, ui) => {
+  const units = unitsOf(PATHID);
+  $('h-unit-tabs').innerHTML = units.map(({ u, ui }) => {
     const up = unitProgress(p, ui);
-    return `<button class="utab ${COLOR_CLASS[ui]}" data-jump="${ui}" style="--fill:${(up.done / up.total).toFixed(3)}" aria-label="Unit ${ui + 1}, ${esc(u.title)}, ${up.done} of ${up.total} done"><b>${ui + 1}</b><span>${up.done}/${up.total}</span></button>`;
-  }).join('') + `<button class="utab c-violet" data-jump="gp" style="--fill:${gpCount ? 1 : 0}" aria-label="Grand Prix"><b><i data-icon="trophy"></i></b><span>GP</span></button>`;
+    return `<button class="utab ${cc(ui)}" data-jump="${ui}" style="--fill:${(up.done / up.total).toFixed(3)}" aria-label="Unit ${unitNo(ui)}, ${esc(u.title)}, ${up.done} of ${up.total} done"><b>${unitNo(ui)}</b><span>${up.done}/${up.total}</span></button>`;
+  }).join('') + (ARMS ? '' : `<button class="utab c-violet" data-jump="gp" style="--fill:${gpCount ? 1 : 0}" aria-label="Grand Prix"><b><i data-icon="trophy"></i></b><span>GP</span></button>`);
 
   let html = '';
-  UNITS.forEach((u, ui) => {
+  units.forEach(({ u, ui }) => {
     const up = unitProgress(p, ui);
     const H = TRAIL_TOP * 2 + 5 * TRAIL_STEP;
     const pts = [0, 1, 2, 3, 4, 5].map((li) => [trailX(ui, li), TRAIL_TOP + li * TRAIL_STEP]);
@@ -620,8 +652,8 @@ function renderHome() {
       const [px, py] = pts[i - 1];
       return `C${px} ${py + TRAIL_STEP / 2} ${x} ${y - TRAIL_STEP / 2} ${x} ${y}`;
     }).join('');
-    html += `<div class="region ${COLOR_CLASS[ui]}" id="region-${ui}">
-      <div class="region-head"><span class="region-num">${ui + 1}</span><div><p class="eyebrow">Unit ${ui + 1} · ${esc(u.section)}</p><h3 class="title">${esc(u.title)}</h3></div>
+    html += `<div class="region ${cc(ui)}" id="region-${ui}">
+      <div class="region-head"><span class="region-num">${unitNo(ui)}</span><div><p class="eyebrow">Unit ${unitNo(ui)} · ${esc(u.section)}</p><h3 class="title">${esc(u.title)}</h3></div>
       <div class="ring small" style="--p:${(up.done / up.total).toFixed(3)}"><span>${up.done}/${up.total}</span></div></div>
       <p class="region-why">${esc(u.move)}. ${esc(u.why)}</p>
       <div class="trail" style="height:${H}px"><svg viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" vector-effect="non-scaling-stroke"/></svg>`;
@@ -637,7 +669,7 @@ function renderHome() {
     }
     html += '</div></div>';
   });
-  html += `<div class="region c-violet" id="region-gp">
+  if (!ARMS) html += `<div class="region c-violet" id="region-gp">
     <div class="region-head"><span class="region-num"><i data-icon="trophy"></i></span><div><p class="eyebrow">Together · head and face</p><h3 class="title">${GRAND_PRIX.name}</h3></div></div>
     <p class="region-why">${esc(GRAND_PRIX.how)} Open any time.</p>
     <div class="trail short"><button class="stop" style="left:28%;top:46px" data-gp="1" aria-label="Grand Prix">${diamond(gpCount ? 'done' : 'open', { boss: true, icon: 'trophy' })}<span class="stop-label"><b>Grand Prix</b><small>${esc(raceTrack('gp').name)} · leaderboard</small><small class="meta">${gpCount ? `Raced ${gpCount} time${gpCount === 1 ? '' : 's'}${p.bosses.gp?.bestMs ? ` · best ${fmt(p.bosses.gp.bestMs)}` : ''}` : 'Not raced yet'}</small></span></button></div>
@@ -657,8 +689,8 @@ $('h-unit-tabs').onclick = (e) => {
   if (b) $(`region-${b.dataset.jump}`)?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
 };
 $('btn-continue').onclick = () => {
-  const nx = nextNode(S.profile);
-  if (!nx) return openStop(-1, -1);
+  const nx = nextNode(S.profile, PATHID);
+  if (!nx) return ARMS ? openStop(unitIndex('a4'), 5) : openStop(-1, -1);
   if (nx.li === 5) return openStop(nx.ui, 5);
   startLesson(nx.ui, nx.li);
 };
@@ -677,6 +709,10 @@ function raceControls(level) {
     case 'u2': return [you, 'Rolls by itself'];
     case 'u3': return ['By itself', head ? 'Open your mouth' : 'Drag up'];
     case 'u4': return ['By itself', head ? 'Pucker to boost' : 'Drag up to boost'];
+    case 'a1': return ['By itself', 'Squeeze either arm'];
+    case 'a2': return ['By itself', 'Hold a squeeze'];
+    case 'a3': return ['By itself', 'Rolls; squeeze to boost'];
+    case 'a4': return ['Left or right arm', 'Both arms: full speed'];
     default: return [you, head ? capital(S.cal?.goLabel || 'your GO move') : 'Hold your finger down'];
   }
 }
@@ -707,7 +743,7 @@ function openStop(ui, li) {
   S.phase = 'home';
   const p = S.profile;
   const t = stopTrack(ui, li);
-  document.querySelector('#s-stop .stop-sheet').className = `panel sheet stop-sheet ${ui < 0 ? 'c-violet' : COLOR_CLASS[ui]}`;
+  document.querySelector('#s-stop .stop-sheet').className = `panel sheet stop-sheet ${ui < 0 ? 'c-violet' : cc(ui)}`;
   const ramps = t.features.filter((f) => f.type === 'ramp').length;
   const jumps = ramps ? `${ramps} jump${ramps === 1 ? '' : 's'}` : 'No jumps';
   let facts;
@@ -719,7 +755,7 @@ function openStop(ui, li) {
     facts = [['Steering', raceControls('gp')[0]], ['Go', raceControls('gp')[1]], ['Best time', p.bosses.gp?.bestMs ? fmt(p.bosses.gp.bestMs) : 'Not yet'], ['Your races', String(p.counts?.gp || 0)]];
   } else {
     const u = UNITS[ui];
-    $('st-unit').textContent = `Unit ${ui + 1} · ${u.title}`;
+    $('st-unit').textContent = `${ARMS ? 'Arm unit' : 'Unit'} ${unitNo(ui)} · ${u.title}`;
     if (li === 5) {
       const b = p.bosses[u.id];
       $('st-title').textContent = `Boss race: ${u.boss.name}`;
@@ -727,7 +763,7 @@ function openStop(ui, li) {
       facts = [['Steering', raceControls(u.id)[0]], ['Go', raceControls(u.id)[1]], ['Best time', b?.bestMs ? fmt(b.bestMs) : 'Not yet'], ['Cleared', b?.cleared ? 'Yes' : 'Not yet']];
       if (!lessonsOf(p, u.id).every((l) => l.done)) note = `The five ${u.title} lessons practise this move first, but you can race now.`;
     } else {
-      const k = KINDS[li];
+      const k = lessonInfo(ui, li);
       const l = lessonsOf(p, u.id)[li];
       $('st-title').textContent = k.title;
       $('st-what').textContent = `${k.what} Do it at each gate to open it. A miss still opens the gate, so you always reach the finish.`;
@@ -738,7 +774,7 @@ function openStop(ui, li) {
         ['Gold', isGold(l) ? 'Yes!' : `${l.goodDays.length} of 2 good days`],
       ];
       const prev = lessonsOf(p, u.id)[li - 1];
-      if (prev && !prev.done && !l.done) note = `Suggested first: ${KINDS[li - 1].title}. You can play this one now anyway.`;
+      if (prev && !prev.done && !l.done) note = `Suggested first: ${lessonInfo(ui, li - 1).title}. You can play this one now anyway.`;
     }
   }
   $('st-course').innerHTML = `${iconSvg('map')}<span>${esc(t.name)}</span>`;
@@ -788,6 +824,7 @@ $('btn-stop-close').onclick = goHome;
 
 // ---------- Lessons: each lesson is its own course that ends at the finish line ----------
 function startLesson(ui, li) {
+  if (pathOf(UNITS[ui]) === 'arms') return startArmLesson(ui, li);
   if (S.mode === 'head' && !S.cal) return runCalibration(() => startLesson(ui, li));
   const unitSigs = UNITS[ui].moves.map((m) => m[0]);
   const reviewSigs = li === 4 && ui > 0 ? UNITS[ui - 1].moves.map((m) => m[0]) : [];
@@ -795,7 +832,15 @@ function startLesson(ui, li) {
   if (need.length) return captureRanges(need, () => startLesson(ui, li));
 
   const lesson = buildLesson(S.profile, ui, li, { verb: verb() });
-  const run = new LessonRun(lesson, { axis: S.cal?.axis || 'yaw' });
+  runLesson(ui, li, lesson, new LessonRun(lesson, { axis: S.cal?.axis || 'yaw' }));
+}
+// Arm lessons: no camera. The sensor check comes first unless it's done or keys/touch are in use.
+function startArmLesson(ui, li) {
+  if (!S.armCheck?.done && !S.armManual && !S.emg.online) return openArmCheck(() => startArmLesson(ui, li));
+  const lesson = buildArmLesson(S.profile, ui, li);
+  runLesson(ui, li, lesson, new ArmRun(lesson));
+}
+function runLesson(ui, li, lesson, run) {
   const track = lessonTrack(ui, li);
   const course = new LessonCourse(track, run);
   S.lesson = {
@@ -814,8 +859,8 @@ function startLesson(ui, li) {
   scene(track, 'chase', 0);
   world?.reset();
   world?.setCar(course.car);
-  document.querySelector('#s-lesson .course-bar').className = `course-bar panel slim ${COLOR_CLASS[ui]}`;
-  $('l-course').textContent = `${track.name} · ${KINDS[li].title}${AUTOPILOT ? ' · autopilot' : ''}`;
+  document.querySelector('#s-lesson .course-bar').className = `course-bar panel slim ${cc(ui)}`;
+  $('l-course').textContent = `${track.name} · ${lessonInfo(ui, li).title}${AUTOPILOT ? ' · autopilot' : ''}`;
   tellAutopilot();
   $('l-track').innerHTML = '<i class="cb-fill" id="l-fill"></i>'
     + track.gates.map((d, i) => `<span class="cb-gate" data-g="${i}" style="left:${((d / track.finishAt) * 100).toFixed(2)}%"></span>`).join('')
@@ -844,16 +889,18 @@ $('btn-l-quit').onclick = () => finishLesson(true);
 
 // ?autopilot: a stand-in player for demos without a face. It only plays while nobody else is:
 // a calibrated face in view, a finger on the screen or a key held takes over straight away.
-const playerActive = () => (S.mode === 'head' && !!S.cal && tracker.faceVisible) || S.touch.active || S.keys.size > 0;
+const playerActive = () => (S.mode === 'head' && !!S.cal && tracker.faceVisible) || (S.mode === 'arms' && S.emg.online) || S.armBtn.l || S.armBtn.r || S.touch.active || S.keys.size > 0;
 const autopilotNow = () => AUTOPILOT && !playerActive();
 let autopilotTold = false;
 function tellAutopilot() {
   if (!AUTOPILOT || autopilotTold) return;
   autopilotTold = true;
+  if (S.mode === 'arms') return toast('Autopilot is on until the arm sensor connects', { icon: 'car' });
   toast(S.mode === 'head' ? 'Autopilot is on until it sees your face' : 'Autopilot is on until you touch the screen', { icon: 'car' });
 }
 const bot = { v: 0 };
 function botSignals(run, dt) {
+  if (S.mode === 'arms') return { ...run.want(), face: true };
   const w = run.want();
   bot.v += (w.value - bot.v) * Math.min(1, dt * 5);
   const s = { side: 0, still: 0, pitch: 0, jaw: 0, pucker: 0, smile: 0, raw: { side: 0, jaw: 0, pucker: 0, smile: 0 }, axis: 'yaw', face: true };
@@ -890,7 +937,7 @@ function lessonFrame(dt, sig) {
   }
 }
 
-const HOLD_LABEL = { reach: 'Hold', aim: 'Hold', hold: 'Hold', quick: 'Time', return: 'Back' };
+const HOLD_LABEL = { reach: 'Hold', aim: 'Hold', hold: 'Hold', quick: 'Time', return: 'Back', relax: 'Loose', curl: 'Rep', swap: 'Switch' };
 function renderLesson(v) {
   const L = S.lesson;
   if (v.cue !== L.lastCue) {
@@ -920,9 +967,12 @@ function renderLesson(v) {
   const g = v.gauge;
   const hide = g.hideDot || L.meterOff;
   const pad = g.type === 'pad';
-  $('l-gauge').classList.toggle('hidden', pad);
+  const arms = g.type === 'arms';
+  $('l-gauge').classList.toggle('hidden', pad || arms);
   $('l-pad').classList.toggle('hidden', !pad);
-  if (pad) {
+  if (arms) {
+    armLights('l-arms', g, hide ? null : g.want);
+  } else if (pad) {
     const pos = (u) => `${50 + (clamp(u, -1.25, 1.25) / 1.25) * 50}%`;
     const dot = $('l-pdot');
     dot.style.left = pos(g.x);
@@ -992,8 +1042,8 @@ function finishLesson(tired) {
 
 function showDone(sum, out, tired) {
   const L = S.lesson;
-  $('s-done').querySelector('.sheet').className = `panel sheet ${COLOR_CLASS[L.ui]}`;
-  $('d-unit').textContent = `Unit ${L.ui + 1} · ${UNITS[L.ui].title} · ${L.track.name}`;
+  $('s-done').querySelector('.sheet').className = `panel sheet ${cc(L.ui)}`;
+  $('d-unit').textContent = `Unit ${unitNo(L.ui)} · ${UNITS[L.ui].title} · ${L.track.name}`;
   $('d-title').textContent = tired ? 'Good call to rest' : sum.rate >= 0.9 ? 'Brilliant!' : sum.rate >= 0.6 ? 'Course complete' : 'You made it';
   $('d-score').textContent = `${sum.good}/${sum.total}`;
   $('d-xp').textContent = `+${out.xp}`;
@@ -1028,7 +1078,7 @@ function showDone(sum, out, tired) {
   const tv = todayView(S.profile, localDay());
   $('d-today').textContent = tv.met ? `Goal done! ${fmtMin(tv.min)} min` : `${fmtMin(tv.min)} of ${tv.goalMin} min`;
   fillBar('d-goal', tv.frac);
-  $('btn-next').innerHTML = `<span data-icon="play">${L.li < 4 ? `Next: ${KINDS[L.li + 1].title}` : 'Next: the boss race'}</span>`;
+  $('btn-next').innerHTML = `<span data-icon="play">${L.li < 4 ? `Next: ${lessonInfo(L.ui, L.li + 1).title}` : 'Next: the boss race'}</span>`;
   mountIcons($('btn-next'));
   startRest();
   show('s-done');
@@ -1083,7 +1133,19 @@ function goNow() {
 }
 
 // Each boss race uses one exercise. The car steers itself unless steering is the exercise.
-function bossControl(level, it, sig, car) {
+function bossControl(level, it, sig, car, dt) {
+  if (level.startsWith('a')) {
+    const c = armRaceControl(level, sig, S.armRace, dt, autoSteer(car));
+    const on = sig.face && (sig.l || sig.r);
+    if (on && !S.armRace.wasOn) S.stats.squeezes++;
+    S.armRace.wasOn = on;
+    if (on) S.stats.onMs += dt * 1000;
+    if (c.boost) {
+      car.boost = 1.0;
+      world?.fx({ boost: true });
+    }
+    return c;
+  }
   const on = sig.face;
   switch (level) {
     case 'u1': return { steer: autoSteer(car), go: on ? clamp((0.5 - sig.still) / 0.3, 0, 1) : 0 };
@@ -1108,6 +1170,7 @@ function bossControl(level, it, sig, car) {
 function bossPreview(level, it, sig) {
   if (level === 'gp') return it;
   if (!sig.face) return { steer: 0, go: 0 };
+  if (level.startsWith('a')) return { steer: level === 'a4' ? (sig.l && !sig.r ? -1 : sig.r && !sig.l ? 1 : 0) : 0, go: sig.l || sig.r ? 1 : 0 };
   return {
     u1: { steer: 0, go: clamp((0.5 - sig.still) / 0.3, 0, 1) },
     u2: { steer: it.steer, go: 0.6 },
@@ -1115,12 +1178,13 @@ function bossPreview(level, it, sig) {
     u4: { steer: 0, go: sig.pucker },
   }[level];
 }
-const GO_LABEL = { u1: 'Steady', u2: 'Auto', u3: 'Mouth', u4: 'Pucker' };
+const GO_LABEL = { u1: 'Steady', u2: 'Auto', u3: 'Mouth', u4: 'Pucker', a1: 'Squeeze', a2: 'Hold', a3: 'Pump', a4: 'Arms' };
 const raceTitle = (level) => (level === 'gp' ? GRAND_PRIX.name : `Boss race · ${levelName(level)}`);
 
 function howTo() {
   if (S.level !== 'gp') {
     const u = UNITS[unitIndex(S.level)];
+    if (S.mode === 'arms') return esc(u.boss.how) + (S.armManual || !S.emg.online ? ' No sensor? Hold A and D, or the Left and Right buttons.' : '');
     return esc(u.boss.how) + (S.mode === 'touch' ? ' On touch: slide to steer, drag up for face moves.' : '');
   }
   if (S.mode === 'touch') return 'Hold a finger on the screen to go. Slide it left or right to steer.';
@@ -1140,6 +1204,8 @@ function goWait() {
   $('btn-recal').classList.toggle('hidden', !head);
   $('sens-choices').classList.toggle('hidden', !head || !(S.level === 'gp' || S.level === 'u2'));
   $('btn-local').classList.toggle('hidden', ARCADE);
+  $('turn-text').textContent = S.mode === 'arms' ? 'Find the real car. Sit comfortably with the arm sensors on.' : 'Find the real car, then keep your face in view of the camera.';
+  $('turn-hold-hint').textContent = S.mode === 'arms' ? 'Or squeeze an arm and hold it for a second.' : 'Or hold your GO move for a second.';
   $('wait-pos').textContent = 'Joining the line…';
   show('s-wait');
   scene(S.track, 'showcase', 0.62);
@@ -1168,7 +1234,8 @@ $('btn-start').onclick = () => {
 function startCountdownView() {
   S.phase = 'countdown';
   S.car = newCar(S.track);
-  S.stats = { headMoves: 0, goMoves: 0, goHoldMs: 0, wallHits: 0, jumps: 0, puckers: 0, steerUp: false, goUp: false };
+  S.stats = { headMoves: 0, goMoves: 0, goHoldMs: 0, wallHits: 0, jumps: 0, puckers: 0, squeezes: 0, onMs: 0, steerUp: false, goUp: false };
+  S.armRace = {};
   S.puckerUp = false;
   S.lastBoost = 0;
   scene(S.track, 'chase', 0);
@@ -1181,7 +1248,7 @@ function startCountdownView() {
   $('hud-name').textContent = `${S.level === 'gp' ? S.track.name : levelName(S.level)}${S.local ? ' · phone' : ''}${AUTOPILOT ? ' · autopilot' : ''}`;
   tellAutopilot();
   $('r-go-label').textContent = S.level === 'gp' ? 'Go' : GO_LABEL[S.level];
-  $('r-steer-wrap').classList.toggle('hidden', !(S.level === 'gp' || S.level === 'u2')); // the other races steer themselves
+  $('r-steer-wrap').classList.toggle('hidden', !['gp', 'u2', 'a4'].includes(S.level)); // the other races steer themselves
   drawMinimapBase();
 }
 
@@ -1210,6 +1277,7 @@ addEventListener('blur', () => S.keys.clear());
 const SIG_KEYS = ['side', 'still', 'pitch', 'jaw', 'pucker', 'smile'];
 // Per-exercise signals for lessons and boss races, smoothed so camera jitter doesn't flicker targets.
 function readSignals() {
+  if (S.mode === 'arms') return (S.sig = readArms());
   let s;
   if (S.mode === 'head') {
     s = S.cal && tracker.m && tracker.faceVisible
@@ -1241,7 +1309,12 @@ function readIntent() {
   let steer = 0;
   let go = 0;
   let lost = false;
-  if (S.mode === 'head') {
+  if (S.mode === 'arms') {
+    const a = S.sig || readArms();
+    go = a.l || a.r ? 1 : 0;
+    steer = a.l && !a.r ? -1 : a.r && !a.l ? 1 : 0;
+    lost = !a.face;
+  } else if (S.mode === 'head') {
     if (S.cal && tracker.m && tracker.faceVisible) ({ steer, go } = toIntent(S.cal, tracker.m, S.sens));
     else lost = true; // can't see the face: no gas
   } else if (S.touch.active) {
@@ -1360,16 +1433,17 @@ function raceStats() {
   const st = S.stats;
   const stats = { headMoves: st.headMoves, goMoves: st.goMoves, goHoldMs: Math.round(st.goHoldMs), wallHits: st.wallHits, jumps: st.jumps };
   if (S.level === 'u4') Object.assign(stats, { goMoves: st.puckers, goHoldMs: 0 });
+  if (S.level.startsWith('a')) Object.assign(stats, { headMoves: 0, goMoves: st.squeezes, goHoldMs: Math.round(st.onMs) });
   return stats;
 }
 
 function raceFrame(dt, it, sig) {
   const car = S.car;
   const auto = autopilotNow();
-  const face = auto || S.mode !== 'head' || sig.face;
+  const face = auto || S.mode === 'touch' || sig.face;
   if (S.phase === 'racing') {
     // Grand Prix: your head steers and your GO move drives. Boss races use their unit's move.
-    const ctl = S.level === 'gp' || auto ? it : bossControl(S.level, it, sig, car);
+    const ctl = S.level === 'gp' || auto ? it : bossControl(S.level, it, sig, car, dt);
     const ev = step(car, ctl.steer, ctl.go, dt, S.assist);
     countStats(ctl, dt, ev);
     world?.fx(ev);
@@ -1394,7 +1468,7 @@ function raceFrame(dt, it, sig) {
         sendFinish({ t: 'finish', rawMs, stars: car.stars.length, stats: raceStats() });
       }
     } else if (!face) {
-      overlay("Can't see your face", true);
+      overlay(S.mode === 'arms' ? 'Arm sensor offline' : "Can't see your face", true);
     } else if ($('race-overlay').classList.contains('msg')) {
       overlay('');
     }
@@ -1402,6 +1476,7 @@ function raceFrame(dt, it, sig) {
   world?.setCar({ x: car.x, y: car.y, z: car.z, h: car.h, v: car.v, vz: car.vz, steer: car.steer, air: car.air, boost: car.boost });
   $('cam-slot-race').classList.toggle('lost', !face);
   setMeters('r-steer', 'r-go', bossPreview(S.level, it, sig));
+  if (S.mode === 'arms') armLights('r-arms', sig);
   drawMinimap(car);
 }
 
@@ -1465,6 +1540,10 @@ const RESULT_ROWS = {
   u2: (st) => [['Head moves', st.headMoves], ['Wall bumps', st.wallHits]],
   u3: (st) => [['Mouth openings', st.goMoves], ['Mouth open', sec(st.goHoldMs)], ['Wall bumps', st.wallHits]],
   u4: (st) => [['Puckers', st.goMoves], ['Jumps', st.jumps ?? 0], ['Wall bumps', st.wallHits]],
+  a1: (st) => [['Squeezes', st.goMoves], ['Time squeezing', sec(st.goHoldMs)], ['Wall bumps', st.wallHits]],
+  a2: (st) => [['Time holding', sec(st.goHoldMs)], ['Squeezes', st.goMoves], ['Wall bumps', st.wallHits]],
+  a3: (st) => [['Squeezes', st.goMoves], ['Jumps', st.jumps ?? 0], ['Wall bumps', st.wallHits]],
+  a4: (st) => [['Squeezes', st.goMoves], ['Time squeezing', sec(st.goHoldMs)], ['Wall bumps', st.wallHits]],
 };
 
 function showResult(r) {
@@ -1629,15 +1708,16 @@ function renderMenu() {
   const lv = xpLevel(p.xp);
   const days = Object.values(p.days || {});
   const total = (f) => days.reduce((a, d) => a + (f(d) || 0), 0);
-  const pp = pathProgress(p);
+  const pp = pathProgress(p, PATHID);
   const wv = weekView(p, day);
+  const units = unitsOf(PATHID);
   const tiles = [
     ['bolt', `Level ${lv.level}`, 'Player level', `${p.xp} XP · ${lv.to - p.xp} to go`],
     ['clock', fmtMin(total((d) => d.ms) / 60000), 'Minutes practised', `on ${days.filter((d) => d.ms > 0).length} day${days.filter((d) => d.ms > 0).length === 1 ? '' : 's'}`],
     ['gate', total((d) => d.good), 'Gates opened', `${total((d) => d.reps)} reps in all`],
     ['map', `${pp.done}/${pp.total}`, 'Stops done', `${pp.gold} gold`],
     ['flame', `${wv.streak} wk`, 'Week streak', `${wv.count} of ${wv.target} days this week`],
-    ['car', UNITS.filter((u) => p.bosses[u.id]?.cleared).length, 'Bosses cleared', `of ${UNITS.length}`],
+    ['car', units.filter(({ u }) => p.bosses[u.id]?.cleared).length, 'Bosses cleared', `of ${units.length}`],
   ];
   $('m-tiles').innerHTML = tiles.map(([ic, b, s, sm]) => `<div class="tile">${iconSvg(ic)}<span>${esc(s)}</span><b>${esc(b)}</b><small>${esc(sm)}</small></div>`).join('');
 
@@ -1654,19 +1734,21 @@ function renderMenu() {
   $('m-chart-note').textContent = `Minutes per day for the last two weeks. Green bars hit your ${p.goalMin}-minute goal.`;
 
   const rows = rangeRows(p);
-  $('m-ranges').innerHTML = rows.length
+  $('m-ranges').innerHTML = ARMS
+    ? '<p class="hint">The arm sensors only say on or off, so the arm path tracks your scores, hold times and reaction times instead of a range.</p>'
+    : rows.length
     ? rows.map((r) => `<div class="range"><span>${esc(r.label)}</span><div class="bar"><i style="width:100%"></i><em style="left:${(r.frac * 100).toFixed(1)}%"></em></div><small>${esc(r.text)}</small></div>`).join('')
       + '<p class="hint">The dark mark is day 1. The bar is your best since.</p>'
     : '<p class="hint">Play a "Find it" lesson to measure your range. Come back another day to see it grow.</p>';
 
-  $('m-mastery').innerHTML = UNITS.map((u, ui) => {
+  $('m-mastery').innerHTML = units.map(({ u, ui }) => {
     const L = lessonsOf(p, u.id);
     const b = p.bosses[u.id];
-    return `<div class="m-unit ${COLOR_CLASS[ui]}"><h4><span class="region-num">${ui + 1}</span>${esc(u.title)}</h4>${L.map((l, li) => {
-      const max = knobFor(u.id, KINDS[li].key).max;
+    return `<div class="m-unit ${cc(ui)}"><h4><span class="region-num">${unitNo(ui)}</span>${esc(u.title)}</h4>${L.map((l, li) => {
+      const max = knobFor(u.id, lessonInfo(ui, li).key).max;
       const pips = Array.from({ length: max + 1 }, (_, k) => `<i class="${k <= l.level && l.plays ? 'on' : ''}"></i>`).join('');
       const state = isGold(l) ? ' · gold' : '';
-      return `<div class="m-row"><span><b>${KINDS[li].title}</b><small>${l.plays ? `last ${Math.round((l.lastRate || 0) * 10)}/10${state}` : 'not played'}</small></span><span class="lv" title="Level ${l.level + 1} of ${max + 1}">${pips}</span><span class="lvn">Lv ${l.level + 1}</span></div>`;
+      return `<div class="m-row"><span><b>${lessonInfo(ui, li).title}</b><small>${l.plays ? `last ${Math.round((l.lastRate || 0) * 10)}/10${state}` : 'not played'}</small></span><span class="lv" title="Level ${l.level + 1} of ${max + 1}">${pips}</span><span class="lvn">Lv ${l.level + 1}</span></div>`;
     }).join('')}<div class="m-row boss"><span><b>Boss: ${esc(u.boss.name)}</b><small>${b?.cleared ? 'cleared' : 'not cleared yet'}</small></span><span></span><span class="lvn">${b?.bestMs ? fmt(b.bestMs) : ''}</span></div></div>`;
   }).join('');
 
@@ -1674,15 +1756,18 @@ function renderMenu() {
   $('m-awards-count').textContent = `${aw.filter((a) => a.done).length} of ${aw.length} earned`;
   $('m-awards').innerHTML = aw.map((a) => `<li class="award${a.done ? ' done' : ''}"><span class="medal">${iconSvg(a.done ? 'medal' : 'lock')}</span><div><b>${esc(a.title)}</b><p>${esc(a.what)}</p><div class="prog"><div class="bar"><i style="width:${((a.have / a.need) * 100).toFixed(1)}%"></i></div><small>${a.have}/${a.need}</small></div></div></li>`).join('');
 
-  $('m-controls').textContent = S.mode === 'head'
+  $('m-controls').textContent = S.mode === 'arms'
+    ? S.armManual ? 'You use the A and D keys, or the on-screen Left and Right buttons.' : `You use the arm sensors${S.armSwap ? ', with left and right swapped' : ''}.`
+    : S.mode === 'head'
     ? S.cal ? `You use the camera. You ${S.cal.steerLabel} to steer and ${S.cal.goLabel} to go.` : 'You use the camera. Head setup is not done yet.'
     : 'You use touch. Slide sideways for left and right, and drag up for face moves.';
-  $('btn-m-controls').innerHTML = `<span data-icon="${S.mode === 'head' ? 'hand' : 'camera'}">${S.mode === 'head' ? 'Use touch instead' : 'Use the camera'}</span>`;
+  $('btn-m-controls').innerHTML = S.mode === 'arms' ? '<span data-icon="arm">Sensor check</span>' : `<span data-icon="${S.mode === 'head' ? 'hand' : 'camera'}">${S.mode === 'head' ? 'Use touch instead' : 'Use the camera'}</span>`;
   $('btn-m-recal').classList.toggle('hidden', S.mode !== 'head');
   mountIcons($('s-menu'));
 }
 $('btn-m-recal').onclick = () => (tracker.lm ? runCalibration(goHome) : show('s-camera'));
 $('btn-m-controls').onclick = () => {
+  if (S.mode === 'arms') return openArmCheck();
   if (S.mode === 'head') {
     S.mode = 'touch';
     toast('Touch controls on', { icon: 'hand' });
@@ -1696,6 +1781,113 @@ $('btn-m-name').onclick = () => {
   show('s-name');
   scene(raceTrack('gp'), 'showcase', 0.55);
 };
+
+// ---------- Arm path: the two biceps sensors, or keys and buttons instead ----------
+// The sensors only say "flexing or not" for each arm. A and D (or ← and →) and the on-screen
+// Left/Right lights work too, for testing or when there's no sensor.
+function readArms() {
+  const e = S.emg;
+  const k = S.keys;
+  const kl = k.has('a') || k.has('A') || k.has('ArrowLeft') || S.armBtn.l;
+  const kr = k.has('d') || k.has('D') || k.has('ArrowRight') || S.armBtn.r;
+  if ((kl || kr) && !e.online) S.armManual = true;
+  const sl = e.online && !!(S.armSwap ? e.r : e.l);
+  const sr = e.online && !!(S.armSwap ? e.l : e.r);
+  return { l: sl || kl, r: sr || kr, face: e.online || S.armManual };
+}
+// Light up each arm; want = { l: 'on' | 'off' | null, r } marks what the exercise asks for.
+function armLights(id, sig, want = null) {
+  for (const b of $(id).children) {
+    const side = b.dataset.side;
+    const cls = ['arm-light', sig[side] && 'on', want?.[side] && `want-${want[side]}`].filter(Boolean).join(' ');
+    if (b.className !== cls) b.className = cls;
+  }
+}
+document.querySelectorAll('.arm-lights').forEach((box) =>
+  box.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('[data-side]');
+    if (!b) return;
+    e.preventDefault();
+    b.setPointerCapture?.(e.pointerId);
+    const side = b.dataset.side;
+    S.armBtn[side] = true;
+    const up = () => {
+      S.armBtn[side] = false;
+      b.removeEventListener('pointerup', up);
+      b.removeEventListener('pointercancel', up);
+    };
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+  }),
+);
+
+const ARM_STEPS = [
+  { key: 'l', text: 'Squeeze your left arm', ok: (s) => s.l && !s.r, ms: 400 },
+  { key: 'r', text: 'Squeeze your right arm', ok: (s) => s.r && !s.l, ms: 400 },
+  { key: 'relax', text: 'Relax both arms for a second', ok: (s) => !s.l && !s.r, ms: 1000 },
+];
+function openArmCheck(next = goHome) {
+  S.armCheck = { step: 0, t: 0, done: false, next, online: null };
+  S.phase = 'armcheck';
+  $('ac-swap').checked = S.armSwap;
+  renderArmStatus();
+  renderArmCheck();
+  show('s-arms');
+  scene(raceTrack('a4'), 'showcase', 0.55);
+  world?.reset();
+}
+function renderArmStatus() {
+  S.armCheck.online = S.emg.online;
+  $('ac-status').innerHTML = S.emg.online
+    ? '<span class="lamp on"></span>Arm sensor connected'
+    : '<span class="lamp"></span>Waiting for the arm sensor. Turn it on, or use the keys or buttons.';
+}
+function renderArmCheck() {
+  const c = S.armCheck;
+  $('ac-steps').innerHTML = ARM_STEPS.map((st, i) => `<li class="${i < c.step ? 'done' : i === c.step ? 'now' : ''}">${esc(st.text)}</li>`).join('');
+  $('btn-ac-go').innerHTML = `<span data-icon="${c.done ? 'check' : 'right'}">${c.done ? 'Sensors ready: continue' : 'Skip the check'}</span>`;
+  $('btn-ac-go').className = `btn ${c.done ? 'primary' : 'quiet'}`;
+  mountIcons($('btn-ac-go'));
+}
+function armCheckFrame(sig, dt) {
+  const c = S.armCheck;
+  if (c.online !== S.emg.online) renderArmStatus();
+  const st = ARM_STEPS[c.step];
+  if (st && st.ok(sig)) {
+    c.t += dt * 1000;
+    if (c.t >= st.ms) {
+      c.step++;
+      c.t = 0;
+      if (c.step === ARM_STEPS.length) {
+        c.done = true;
+        toast('Both arms found', { icon: 'check' });
+      }
+      renderArmCheck();
+    }
+  } else c.t = 0;
+  const want = !st ? null : st.key === 'relax' ? { l: 'off', r: 'off' } : { [st.key]: 'on' };
+  armLights('ac-arms', sig, want);
+}
+const leaveArmCheck = () => {
+  const next = S.armCheck?.next || goHome;
+  if (S.armCheck) S.armCheck.done = true;
+  next();
+};
+$('btn-ac-go').onclick = leaveArmCheck;
+$('btn-ac-keys').onclick = () => {
+  S.armManual = true;
+  toast('Keys and buttons on: hold A or D, or the Left and Right lights', { icon: 'hand' });
+  leaveArmCheck();
+};
+$('ac-swap').onchange = (e) => {
+  S.armSwap = e.target.checked;
+  store.set('rc-arm-swap', S.armSwap ? '1' : '0');
+};
+if (ARMS) {
+  document.title = 'Head Racer · Arm path';
+  $('name-hand').textContent = 'arm path';
+  $('name-intro').textContent = 'Biceps exercises with two muscle sensors that see whether each arm is flexing. Every lesson is its own little course: open each gate by squeezing or relaxing on cue, then drive on to the finish line.';
+}
 
 // ---------- Main loop ----------
 let last = performance.now();
@@ -1723,6 +1915,8 @@ function frame(now) {
     fillBar('turn-hold', held);
     if (held >= 1) $('btn-start').onclick();
   }
+  if (S.phase === 'armcheck') armCheckFrame(sig, dt);
+  else if (S.phase === 'waiting' && S.mode === 'arms') armLights('w-arms', sig);
   if (inRace) raceFrame(dt, it, sig);
   if (inLesson) lessonFrame(dt, sig);
 
@@ -1760,5 +1954,5 @@ document.addEventListener('visibilitychange', () => {
 });
 
 if (ARCADE) arcadeHome();
-else if (PATH) show('s-name');
+else if (PATH || ARMS) show('s-name');
 connect();

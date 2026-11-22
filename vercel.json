@@ -7,11 +7,13 @@
   "rewrites": [
     { "source": "/arcade", "destination": "/" },
     { "source": "/path", "destination": "/" },
+    { "source": "/arms", "destination": "/" },
     { "source": "/qr.svg", "destination": "/api/qr" },
     { "source": "/api/practice.csv", "destination": "/api/practice" }
   ],
   "functions": {
     "api/ws.js": { "maxDuration": 300 },
-    "api/car.js": { "maxDuration": 300 }
+    "api/car.js": { "maxDuration": 300 },
+    "api/emg.js": { "maxDuration": 300 }
   }
 }

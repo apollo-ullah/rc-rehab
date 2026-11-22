@@ -22,7 +22,7 @@
     <div class="panel sheet welcome">
       <p class="hand tilt">welcome to</p>
       <h1 class="title">Head Racer</h1>
-      <p>Steer with your head and go with a face move. A real RC car drives along with you. Pick how you want to play.</p>
+      <p>Steer with your head and go with a face move, or train your arms with muscle sensors. A real RC car drives along with you. Pick how you want to play.</p>
       <nav class="modes" aria-label="Choose a mode">
         <a class="mode c-coral" href="/arcade">
           <span class="mode-icon" data-icon="trophy"></span>
@@ -41,6 +41,14 @@
           </span>
           <span class="mode-go" data-icon="right"></span>
         </a>
+        <a class="mode c-sun" href="/arms">
+          <span class="mode-icon" data-icon="arm"></span>
+          <span class="mode-text">
+            <b>Arm path</b>
+            <span>Biceps exercises with two muscle sensors: squeeze, hold, let go and curl. Saved on this device.</span>
+          </span>
+          <span class="mode-go" data-icon="right"></span>
+        </a>
       </nav>
       <p class="fine">Practise seated with good support. A practice tool to use alongside therapy, not a medical device.</p>
     </div>
@@ -49,9 +57,9 @@
   <!-- 1. Practice path: your name -->
   <section class="screen" id="s-name">
     <div class="panel sheet welcome">
-      <p class="hand tilt">practice path</p>
+      <p class="hand tilt" id="name-hand">practice path</p>
       <h1 class="title">Head Racer</h1>
-      <p>Short daily head and face exercises. Every lesson is its own little course: open each gate with your move, then drive on to the finish line.</p>
+      <p id="name-intro">Short daily head and face exercises. Every lesson is its own little course: open each gate with your move, then drive on to the finish line.</p>
       <div class="field">
         <label for="name">Your name</label>
         <input id="name" type="text" maxlength="20" autocomplete="off" autocapitalize="words" enterkeyhint="go" placeholder="Type your name" />
@@ -192,6 +200,21 @@
     </div>
   </section>
 
+  <!-- Arm path: check the two biceps sensors -->
+  <section class="screen" id="s-arms">
+    <div class="panel sheet">
+      <p class="hand tilt">arm path</p>
+      <h2 class="title">Sensor check</h2>
+      <p class="car-status" id="ac-status" role="status"></p>
+      <div class="arm-lights big" id="ac-arms"><button type="button" class="arm-light" data-side="l"><span>Left</span></button><button type="button" class="arm-light" data-side="r"><span>Right</span></button></div>
+      <ol class="ac-steps" id="ac-steps"></ol>
+      <label class="check"><input type="checkbox" id="ac-swap" /><span>Swap left and right (if the wrong side lights up)</span></label>
+      <p class="fine">Sit with your arms supported. A gentle squeeze is enough: the sensors only see whether the muscle is working, not how hard. Stop if anything hurts, and only add a weight if a therapist says so.</p>
+      <button class="btn primary" id="btn-ac-go"><span>Continue</span></button>
+      <button class="btn quiet" id="btn-ac-keys"><span data-icon="hand">No sensor: use keys or buttons</span></button>
+    </div>
+  </section>
+
   <!-- 6. Lesson on its course -->
   <section class="screen hud" id="s-lesson">
     <div class="touch-pad hidden" id="touch-pad-lesson"></div>
@@ -215,6 +238,7 @@
         <div class="meter-main">
           <div class="gauge" id="l-gauge"><div class="band" id="l-band"></div><div class="mid"></div><div class="dot" id="l-dot"></div></div>
           <div class="pad2d hidden" id="l-pad"><div class="zone" id="l-zone"></div><div class="dot" id="l-pdot"></div></div>
+          <div class="arm-lights hidden" id="l-arms"><button type="button" class="arm-light" data-side="l"><span>Left</span></button><button type="button" class="arm-light" data-side="r"><span>Right</span></button></div>
           <div class="hold-row"><span class="hint" id="l-hold-label">Hold</span><div class="bar sun"><i id="l-hold"></i></div></div>
         </div>
         <div class="cam" id="cam-slot-lesson"></div>
@@ -267,6 +291,7 @@
           <div class="gauge bi"><div class="mid"></div><div class="dot" id="w-steer"></div></div>
           <div class="meter-label"><span>Go</span><span id="w-go-label"></span></div>
           <div class="bar"><i id="w-go"></i></div>
+          <div class="arm-lights small hidden" id="w-arms"><button type="button" class="arm-light" data-side="l"><span>Left</span></button><button type="button" class="arm-light" data-side="r"><span>Right</span></button></div>
         </div>
         <div class="cam small" id="cam-slot-wait"><span class="badge" id="wait-badge"></span></div>
       </div>
@@ -289,7 +314,7 @@
     <div class="panel sheet">
       <p class="hand tilt">it's your turn</p>
       <h1 class="title">Ready?</h1>
-      <p>Find the real car, then keep your face in view of the camera.</p>
+      <p id="turn-text">Find the real car, then keep your face in view of the camera.</p>
       <button class="btn primary huge" id="btn-start"><span data-icon="play">Start</span></button>
       <p class="hint" id="turn-hold-hint">Or hold your GO move for a second.</p>
       <div class="bar"><i id="turn-hold"></i></div>
@@ -312,6 +337,7 @@
       <div class="meter-card panel slim">
         <div class="meter-main">
           <div class="gauge bi" id="r-steer-wrap"><div class="mid"></div><div class="dot" id="r-steer"></div></div>
+          <div class="arm-lights small hidden" id="r-arms"><button type="button" class="arm-light" data-side="l"><span>Left</span></button><button type="button" class="arm-light" data-side="r"><span>Right</span></button></div>
           <div class="hold-row"><span class="hint" id="r-go-label">Go</span><div class="bar"><i id="r-go"></i></div></div>
         </div>
         <div class="cam" id="cam-slot-race"></div>

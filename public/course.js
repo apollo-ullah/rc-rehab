@@ -77,8 +77,8 @@ export class LessonCourse {
       out.sub = '';
     } else if (this.mode === 'drive') {
       if (lost) {
-        out.cue = "Can't see your face";
-        out.sub = 'Move back into view. The car waits for you.';
+        out.cue = this.run.lostCue || "Can't see your face";
+        out.sub = this.run.lostSub || 'Move back into view. The car waits for you.';
       } else if (!(this.run.phase === 'result' && !this.run.done)) {
         const r = this.run.rep;
         out.cue = this.gate < n ? `Gate ${this.gate + 1} of ${n}` : 'On to the finish!';

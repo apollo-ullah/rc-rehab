@@ -680,3 +680,34 @@ input[type='text']:focus { outline: none; box-shadow: inset 0 0 0 2.5px var(--te
   .sheet, .overlay.pop, .cue.pop, .toast, .breath, .here, .s-next::after { animation: none; }
   .btn > span, .seg label, .gauge .band, .pad2d .zone, .bar > i { transition: none; }
 }
+
+/* Arm path: the two biceps lights. They are also hold-to-press buttons when there's no sensor. */
+.arm-lights { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.arm-lights.hidden { display: none; }
+.arm-light {
+  position: relative; min-height: 54px; border: 0; border-radius: 14px; background: var(--wash);
+  box-shadow: inset 0 0 0 2px var(--line); color: var(--ink-2); font: 900 16px/1 var(--ui);
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer;
+  transition: background 120ms var(--ease-out), box-shadow 120ms var(--ease-out), transform 120ms var(--ease-out);
+}
+.arm-light.on { background: var(--sun); color: var(--ink); transform: scale(1.03); box-shadow: inset 0 0 0 2px var(--sun-deep); }
+.arm-light.want-on { box-shadow: inset 0 0 0 3px var(--good), 0 0 0 4px rgba(47, 174, 111, 0.22); }
+.arm-light.want-off { box-shadow: inset 0 0 0 2px var(--line-2); }
+.arm-light.want-on::after, .arm-light.want-off::after {
+  position: absolute; left: 0; right: 0; bottom: 6px; font: 800 11.5px/1 var(--ui); color: var(--ink-2);
+}
+.arm-light.want-on::after { content: 'squeeze'; color: var(--teal-deep); }
+.arm-light.want-off::after { content: 'relax'; }
+.arm-light.on.want-on { background: var(--good); color: #fff; }
+.arm-light.on.want-on::after { color: #fff; }
+.arm-lights.big .arm-light { min-height: 120px; font-size: 22px; }
+.arm-lights.small .arm-light { min-height: 40px; font-size: 14px; }
+.ac-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.ac-steps li { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--ink-3); }
+.ac-steps li::before { content: ''; width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line-2); flex: none; }
+.ac-steps li.now { color: var(--ink); }
+.ac-steps li.now::before { box-shadow: inset 0 0 0 3px var(--sun); }
+.ac-steps li.done { color: var(--good); }
+.ac-steps li.done::before { background: var(--good); box-shadow: none; }
+.check { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink-2); }
+.check input { width: 22px; height: 22px; accent-color: var(--teal); flex: none; }

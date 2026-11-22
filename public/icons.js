@@ -2,6 +2,7 @@
 const ICONS = {
   star: '<path d="M12 3.2l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.6l-5.2 2.8 1-5.9L3.5 9.4l5.9-.8z" fill="currentColor" stroke-linejoin="round"/>',
   flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  arm: '<path d="M3 18.5h10.5a5.5 5.5 0 0 0 5.5-5.5V6.8a2.6 2.6 0 0 0-5.2 0v3.4c-1.7-1.7-4.6-2-6.8-.6C5.4 10.6 4 11.7 3 12.4"/><path d="M13.8 10.2c.6 1.2.7 2.5.2 3.8"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H4.5a3 3 0 0 0 3.5 4M16 6h3.5a3 3 0 0 1-3.5 4M12 13v4M8.5 20h7M10 17h4v3h-4z"/>',
   up: '<path d="M4 17l6-6 4 4 6-7M14 8h6v6"/>',
   face: '<circle cx="12" cy="12" r="8.5"/><path d="M9 10h.01M15 10h.01M8.8 14.5a4 4 0 0 0 6.4 0"/>',

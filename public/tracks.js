@@ -282,13 +282,28 @@ const RACES = {
   },
 };
 
+// Arm path boss races: the head path's courses, mirrored, with their own names.
+const mirrorOf = (id, extra) => ({ ...RACES[id], ...extra, ctrl: RACES[id].ctrl.map(([x, y]) => [-x, y]) });
+Object.assign(RACES, {
+  a1: mirrorOf('u3', { name: 'Sunset Canyon' }),
+  a2: mirrorOf('u1', { name: 'Long Lake' }),
+  a3: mirrorOf('u4', { name: 'Pump Beach' }),
+  a4: mirrorOf('u2', { name: 'Pine Valley' }),
+});
+
 // ---------- Lesson courses: one per unit and lesson type ----------
 const UNIT_THEME = [
   { theme: 'lake', color: 'sky', names: ['Calm Bay', 'Long Pier', 'Lily Pads', 'Ripple Run', 'Lake Tour'] },
   { theme: 'forest', color: 'mint', names: ['Fern Bend', 'Pine Avenue', 'Slalom Woods', 'Zigzag Trail', 'Forest Tour'] },
   { theme: 'canyon', color: 'coral', names: ['Red Rock Rise', 'Mesa Straight', 'Cactus Gap', 'Dust Devil', 'Canyon Tour'] },
   { theme: 'beach', color: 'sun', names: ['Shell Shore', 'Boardwalk', 'Palm Slalom', 'Wave Hop', 'Beach Tour'] },
+  // Arm path
+  { theme: 'canyon', color: 'coral', names: ['Spark Gulch', 'Let-Go Ledge', 'Boulder Hold', 'Quick Draw', 'Canyon Loop'] },
+  { theme: 'lake', color: 'sky', names: ['Long Jetty', 'Harbour Light', 'Twin Docks', 'Still Water', 'Lake Loop'] },
+  { theme: 'beach', color: 'sun', names: ['Tide Steps', 'Lighthouse', 'Twin Dunes', 'Surf Sprint', 'Beach Loop'] },
+  { theme: 'forest', color: 'mint', names: ['Lone Oak', 'Switchback', 'Twin Pines', 'Fork Road', 'Forest Loop'] },
 ];
+const UNIT_IDS = ['u1', 'u2', 'u3', 'u4', 'a1', 'a2', 'a3', 'a4'];
 export const LESSON_GATES = 10;
 const KIND_KEYS = ['find', 'hold', 'aim', 'quick', 'mix'];
 
@@ -330,7 +345,7 @@ function lessonPieces(ui, li, variant) {
   const kind = KIND_KEYS[li];
   const r = rng(1009 * (ui + 1) + 97 * (li + 1) + 7919 * variant);
   const mirror = (ui + li + variant) % 2 ? -1 : 1;
-  const scale = 1 + (ui - 1.5) * 0.05;
+  const scale = 1 + ((ui % 4) - 1.5) * 0.05;
   const drift = mirror * (DRIFT[kind] - (variant % 4) * 4);
   const pieces = [{ len: 160, turn: 0 }];
   for (let i = 0; i < LESSON_GATES; i++) {
@@ -367,7 +382,7 @@ function lessonCourse(ui, li) {
   let t = null;
   for (let variant = 0; variant < 40; variant++) {
     const { pts, marks } = turtle(lessonPieces(ui, li, variant));
-    t = build({ id: `${['u1', 'u2', 'u3', 'u4'][ui]}-${KIND_KEYS[li]}`, name: u.names[li], theme: u.theme, color: u.color, width: 130, finishGap: 60 }, resample(pts));
+    t = build({ id: `${UNIT_IDS[ui]}-${KIND_KEYS[li]}`, name: u.names[li], theme: u.theme, color: u.color, width: 130, finishGap: 60 }, resample(pts));
     t.gates = marks.filter((m) => m.mark === 'gate-in').map((m) => m.at + 60);
     t.features = marks.filter((m) => m.mark === 'ramp').map((m) => ({ type: 'ramp', at: m.at + 50, len: 60 }));
     t.lesson = { ui, li, variant };

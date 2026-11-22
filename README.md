@@ -1,9 +1,10 @@
 # Head Racer
 
-A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The first screen (`/`) asks which of the two modes you want:
+A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The first screen (`/`) asks which of the three modes you want:
 
 - **Arcade** (`/arcade`): type a name, do the quick face setup and race the **Grand Prix** (head steers, a face move drives). Everyone races with **no driving help**, so times compare. The real RC car drives along through an ESP32 when it's connected. Times go on one **shared, saved leaderboard** (fastest and most improved) that anyone with the link sees, live. "Next player" clears everything for the next person, so it works on the event laptop and on anyone's own phone.
 - **Practice path** (`/path`, on anyone's own phone or computer): a **roadmap** of 24 stops: four units (head steady, left and right, jaw, lips) of five lessons and a boss race each, plus the Grand Prix. Every lesson is its own little **course**: the car drives itself to a gate, you do the exercise to open it, and the lesson ends when the car crosses the finish line. Progress is saved **in that browser only**, so coming back on the same phone picks up where you left off. Everything is open from day one; the path only suggests an order.
+- **Arm path** (`/arms`): the same kind of roadmap for the **biceps**, from two EMG muscle sensors on an ESP32 that only report whether each arm is flexing. Four units (wake up, hold strong, curls, left and right) of five lessons and a boss race on the real car. No camera. See [Arm path](#arm-path) below.
 
 ```
 Online:  Laptop / phones / big screen --HTTPS--> Vercel (static pages + WebSocket functions) <--wss:// from any WiFi-- ESP32 --> controller buttons
@@ -34,6 +35,8 @@ Live: **https://head-racer.vercel.app** (the first screen offers both modes).
 
 - **Arcade:** `<link>/arcade` skips the choice (handy on the event laptop). Anyone you share the link with can race; there is one line for the one real car, so racers take turns.
 - **Practice path:** `<link>/path` skips the choice.
+- **Arm path:** `<link>/arms` skips the choice.
+- **Arm sensors ESP32:** `firmware/emg_arms/emg_arms.ino`, block A, with `EMG_PATH "/api/emg?token=<CAR_TOKEN>"` (the same token as the car).
 - **Big screen:** `<link>/screen?admin=<ADMIN_KEY>`. Without the key it is view-only.
 - **ESP32:** in the firmware use block A: `SERVER_HOST` = the link's host name without `https://`, port 443, and `CAR_PATH "/api/car?token=<CAR_TOKEN>"`. It connects from any WiFi with internet.
 - **Practice CSV:** the link on the big screen when it has the admin key.
@@ -119,6 +122,24 @@ Only the Grand Prix and Curvy Road are steered by your head. The other boss race
 **Safety and honesty.** This is a practice tool to use alongside therapy, not a medical device. Practise seated with good support, and stop for pain or dizziness. A therapist should pick which units fit the person. Targets never go past the player's own measured range, and there are no strobe effects. The mouth units are presented as control practice, not as a treatment for speech, drooling or eating, because the evidence for oral-motor exercises is weak. The nod estimate and face scores are approximate. Evidence for head-control games in CP comes from small studies; see the sources below.
 
 **Sources behind the design:** head-mouse games for CP ([Velasco 2017](https://pmc.ncbi.nlm.nih.gov/articles/PMC5568605)), biofeedback dose and faded, self-chosen feedback ([MacIntosh 2019 review](https://www.em-consulte.com/article/1227431/article/biofeedback-intervention-effects-for-people-with-c)), goal-directed training ([Novak 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7035308/)), feedback in motor learning ([JSLHR 2023](https://pubs.asha.org/doi/10.1044/2022_JSLHR-22-00375)), oral-motor evidence ([Arvedson 2010](https://onlinelibrary.wiley.com/doi/10.1111/j.1469-8749.2010.03707.x)), gamification and autonomy ([JMIR Serious Games 2024](https://games.jmir.org/2024/1/e49029)), fatigue and rest ([PMC4942358](https://pmc.ncbi.nlm.nih.gov/articles/PMC4942358)), head arrays and switches ([Sunrise Medical](https://SunriseMedical.com/education-in-motion/blog/january-2024/prescribing-wireless-power-wheelchair-head-control)).
+
+## Arm path
+
+Biceps exercises for when the only input is two yes/no signals: **is the left biceps flexing?** and **is the right?** The full design, the research behind it and what a yes/no signal can and can't measure are in [docs/arm-path.md](docs/arm-path.md).
+
+| Unit | Lessons (10 reps each, the drive between gates is the rest) | Boss race (real car) |
+|---|---|---|
+| 1 Wake up | Squeeze · Let go · Hold · Quick · Mix | **Flex Sprint**: squeeze either arm to drive |
+| 2 Hold strong | Long hold · Hold, then let go · Both arms hold · Stay loose · Mix | **Long Haul**: moves while you hold; a boost every 3 s held |
+| 3 Curls | Up and down · Pause at the top · Both arms · Fast up · Mix | **Pump Track**: rolls by itself; every new squeeze boosts |
+| 4 Left and right | Just one · Switch · Together · Which arm? · Mix | **Arm Grand Prix**: left arm turns left, right turns right, both = full speed |
+
+- Relaxing on cue counts as much as squeezing (in CP the biceps are often over-active), and nothing ever asks you to squeeze harder: the sensors can't tell.
+- Difficulty adapts per lesson like the head path (longer holds, shorter reaction windows, less help from the other arm).
+- **Sensor check** after your name: both arms light up live; squeeze left, squeeze right, relax. "Swap left and right" fixes crossed wires. The menu has it too.
+- **No sensor?** Hold **A** / **D** (or ← / →), or press and hold the on-screen Left / Right lights. `/arms?autopilot` plays lessons and races by itself while the sensor is offline.
+- **Hardware:** two EMG sensors (e.g. MyoWare 2.0, ENV output) on GPIO 34 and 35 of an ESP32 running `firmware/emg_arms/emg_arms.ino`. At power-up keep both arms relaxed for 3 s while it calibrates; type `l` or `r` in the Serial Monitor to set a gentler threshold from a comfortable squeeze. It sends `f <left> <right>` on every change and every 0.5 s; 2 s of silence = offline, so lessons pause and the car waits. The car's own ESP32 may send the same lines instead.
+- One sensor rig per game: everyone in the Arm path sees the same arms, which is fine for a demo.
 
 ## Head control
 

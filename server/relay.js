@@ -205,7 +205,7 @@ export function createRelay({ redisUrl, prefix = 'hr:', carToken, adminKey, time
           return;
         }
         if (m.k === 'open') {
-          if (sockets.has(m.cid) || (m.role !== 'web' && m.role !== 'car')) return;
+          if (sockets.has(m.cid) || !['web', 'car', 'emg'].includes(m.role)) return;
           if (m.origin && !arena.publicUrl) arena.setPublicUrl(m.origin);
           const conn = { open: true, send: (text) => conn.open && queue(m.cid, text), close: () => queue(m.cid, null) };
           sockets.set(m.cid, { conn, h: arena.connect(conn, m.role, { remote: m.remote }) });

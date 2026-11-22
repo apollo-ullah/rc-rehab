@@ -3,7 +3,7 @@
 // and in the cloud (server/relay.js on Vercel, Redis).
 import { STAR_BONUS_MS, RUN_TIMEOUT_MS, ASSIST } from '../public/game.js';
 import { raceTrack } from '../public/tracks.js';
-import { UNITS, KINDS, LEVELS, XP, REPS_PER_LESSON, levelName, unitIndex, localDay } from '../public/path.js';
+import { UNITS, KINDS, LEVELS, XP, REPS_PER_LESSON, levelName, unitIndex, localDay, lessonInfo } from '../public/path.js';
 
 export const CLAIM_MS = 45000; // time to press start when it's your turn
 const COUNTDOWN = 3;
@@ -14,6 +14,7 @@ const RACE_SPAN_MS = CLAIM_MS + COUNTDOWN * 1000 + RUN_TIMEOUT_MS;
 const KEEPALIVE_MS = 25000; // a tiny message now and then so idle phones aren't cut off
 const MAX_MESSAGE = 64 * 1024;
 const PRACTICE_PER_MINUTE = 30; // per connection; a real lesson takes far longer
+const EMG_STALE_MS = 2000; // the arm sensors send at least every 0.5 s; silence this long = offline
 
 export const cleanName = (n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 20);
 const isGp = (r) => !r.level || r.level === 'gp';
@@ -36,9 +37,12 @@ const csvCell = (v) => {
 };
 
 // Which WebSocket path is which. /api/* is the cloud (Vercel) spelling; the laptop accepts both.
+// 'emg' is the arm sensors' ESP32 (docs/arm-path.md); it uses the car's token.
 export function roleFor(pathname, params, carToken) {
   if (pathname === '/ws' || pathname === '/api/ws') return 'web';
-  if ((pathname === '/car' || pathname === '/api/car') && carToken && params.get('token') === carToken) return 'car';
+  const device = carToken && params.get('token') === carToken;
+  if ((pathname === '/car' || pathname === '/api/car') && device) return 'car';
+  if ((pathname === '/emg' || pathname === '/api/emg') && device) return 'emg';
   return null;
 }
 
@@ -93,6 +97,10 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
   let carSince = 0;
   let lastDriveAt = 0; // last time the car got a real (non-stale) drive command
   let run = null; // { id, phase: 'claim'|'countdown'|'racing', claimUntil, goAt, t0, state, lastStateAt, timers: [] }
+  // Arm sensors: is each biceps flexing? Sent to players in the arm path and to the big screen.
+  let emg = { l: false, r: false, online: false };
+  let emgConn = null;
+  let emgAt = 0;
 
   const send = (c, msg) => c && c.open && c.send(JSON.stringify(msg));
   const toScreens = (msg) => screens.forEach((c) => send(c, msg));
@@ -242,7 +250,7 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
     const u = UNITS[unitIndex(e.unit)];
     if (!u) return 'practised';
     if (e.lesson < 0) return `cleared ${u.boss.name}${where}`;
-    return `${u.title} · ${KINDS[e.lesson]?.title ?? ''} ${e.good}/${e.total}`;
+    return `${u.title} · ${lessonInfo(unitIndex(e.unit), e.lesson)?.title ?? ''} ${e.good}/${e.total}`;
   }
 
   function practiceBoard() {
@@ -300,6 +308,32 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
     });
   }
 
+  // ---------- Arm sensors ----------
+  const emgMsg = () => ({ t: 'emg', l: emg.l ? 1 : 0, r: emg.r ? 1 : 0, online: emg.online });
+  function emgOut() {
+    const m = emgMsg();
+    toScreens(m);
+    players.forEach((p) => p.emg && send(p.conn, m));
+  }
+  // "f <left> <right>", each 0 or 1. From the arm sensors' ESP32, or from the car's if one board does both.
+  function onEmg(text) {
+    const m = /^f\s+([01])\s+([01])\s*$/.exec(String(text));
+    if (!m) return false;
+    emgAt = Date.now();
+    const next = { l: m[1] === '1', r: m[2] === '1', online: true };
+    if (next.l !== emg.l || next.r !== emg.r || !emg.online) {
+      emg = next;
+      emgOut();
+    }
+    return true;
+  }
+  function emgOffline() {
+    if (!emg.online) return;
+    emg = { l: false, r: false, online: false };
+    log('💪 Arm sensors offline');
+    emgOut();
+  }
+
   // ---------- Car link ----------
   function driveCar(steer, throttle) {
     if (!car?.open) return;
@@ -309,6 +343,7 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
   }
 
   function drive() {
+    if (emg.online && Date.now() - emgAt > EMG_STALE_MS) emgOffline();
     if (run?.phase === 'racing' && run.state && Date.now() - run.lastStateAt < STALE_MS) {
       lastDriveAt = Date.now();
       driveCar(run.state.cs, run.state.ct);
@@ -375,12 +410,26 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
       log(`🚗 Car connected${info.remote ? ` from ${info.remote}` : ''}`);
       lobby();
       return {
-        message: (m) => log(`🚗 car says: ${String(m).slice(0, 80)}`),
+        message: (m) => onEmg(m) || log(`🚗 car says: ${String(m).slice(0, 80)}`),
         close: onClose(() => {
           if (car !== conn) return;
           car = null;
           log('🚗 Car disconnected');
           lobby();
+        }),
+      };
+    }
+
+    if (role === 'emg') {
+      if (emgConn) emgConn.close();
+      emgConn = conn;
+      log(`💪 Arm sensors connected${info.remote ? ` from ${info.remote}` : ''}`);
+      return {
+        message: (m) => onEmg(m),
+        close: onClose(() => {
+          if (emgConn !== conn) return;
+          emgConn = null;
+          emgOffline();
         }),
       };
     }
@@ -406,6 +455,7 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
           send(conn, { t: 'hello', admin: isAdmin, publicUrl, maxConnMs, freshMs });
           send(conn, { t: 'board', ...boards() });
           send(conn, practiceBoard());
+          send(conn, emgMsg());
           lobby();
           return;
         }
@@ -444,6 +494,11 @@ export function createArena({ store, carToken, adminKey, publicUrl = null, timeZ
       }
 
       if (!me) return;
+      if (msg.t === 'emg_sub') {
+        me.emg = true; // this player is in the arm path: send them the arm sensors
+        send(conn, emgMsg());
+        return;
+      }
       const isDriver = run?.id === me.id;
       if (msg.t === 'practice') {
         const now = Date.now();
@@ -584,7 +639,7 @@ export function createHttpApi({ store, adminKey }) {
       const head = ['date', 'time', 'name', 'unit', 'activity', 'good_reps', 'reps', 'xp', 'minutes', 'avg_reaction_ms', 'fatigue_signs', 'stopped_tired'];
       const rows = (await store.allPractice()).map((e) => {
         const u = UNITS[unitIndex(e.unit)];
-        const activity = (e.unit === 'gp' ? 'Grand Prix' : e.lesson < 0 ? `Boss: ${u?.boss.name}` : KINDS[e.lesson]?.title) + (e.local ? ' (phone)' : '');
+        const activity = (e.unit === 'gp' ? 'Grand Prix' : e.lesson < 0 ? `Boss: ${u?.boss.name}` : lessonInfo(unitIndex(e.unit), e.lesson)?.title) + (e.local ? ' (phone)' : '');
         return [e.day, e.at.slice(11, 19), e.name, u?.title ?? 'Grand Prix', activity, e.good, e.total, e.xp, (e.ms / 60000).toFixed(2), e.reactMs ?? '', e.fatigue ? 'yes' : '', e.tired ? 'yes' : ''];
       });
       return { status: 200, text: [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n'), type: 'text/csv', filename: 'practice.csv' };
