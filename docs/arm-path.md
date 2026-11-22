@@ -94,7 +94,7 @@ drive between gates is the rest, a miss still opens the gate, difficulty adapts 
 3. **Together**: squeeze both at the same moment (within 0.8 s → 0.25 s) and hold 1 s.
 4. **Which arm?**: a random arm is named; squeeze that one fast and not the other.
 5. **Mix** (+ review).
-- Boss **Arm Grand Prix**: you steer. Left arm turns left, right arm turns right, both drive straight at full speed, neither slows down. The real car follows.
+- Boss **Arm Grand Prix** on Pine Speedway (long straights, gentle 90° corners, so the fast real car has room): you steer. Left arm turns right, right arm turns left, both drive straight at full speed, neither slows down. The real car follows.
 
 Safety, in the app: a short warm-up rep starts each lesson; the "I'm tired" button ends a
 lesson and still counts; two fatigue signs (slower reactions, more misses, sensor dropping

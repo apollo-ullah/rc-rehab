@@ -132,7 +132,7 @@ Biceps exercises for when the only input is two yes/no signals: **is the left bi
 | 1 Wake up | Squeeze · Let go · Hold · Quick · Mix | **Flex Sprint**: squeeze either arm to drive |
 | 2 Hold strong | Long hold · Hold, then let go · Both arms hold · Stay loose · Mix | **Long Haul**: moves while you hold; a boost every 3 s held |
 | 3 Curls | Up and down · Pause at the top · Both arms · Fast up · Mix | **Pump Track**: rolls by itself; every new squeeze boosts |
-| 4 Left and right | Just one · Switch · Together · Which arm? · Mix | **Arm Grand Prix**: left arm turns right, right arm turns left (each arm drives its own side's wheels), both = full speed |
+| 4 Left and right | Just one · Switch · Together · Which arm? · Mix | **Arm Grand Prix** on Pine Speedway (long straights): left arm turns right, right arm turns left (each arm drives its own side's wheels), both = full speed |
 
 - Relaxing on cue counts as much as squeezing (in CP the biceps are often over-active), and nothing ever asks you to squeeze harder: the sensors can't tell.
 - Difficulty adapts per lesson like the head path (longer holds, shorter reaction windows, less help from the other arm).

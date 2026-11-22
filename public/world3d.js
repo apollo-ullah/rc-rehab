@@ -15,12 +15,15 @@ const GRID_Y = -260;
 const STOP_LINE = GATE_STOP - 24; // the painted line, just in front of where the car waits
 
 export const ACCENT = { sky: 0x3b9ad9, mint: 0x2fae6f, coral: 0xf26a4b, sun: 0xf2a922, violet: 0x7a66e0 };
-const GLOW = { sky: '#9fd8ff', mint: '#9ff0c4', coral: '#ffc2ad', sun: '#ffe39a', violet: '#cdbfff' };
+// Night-time look: islands float over a deep indigo floor with violet × marks, ringed by a white
+// glowing rim and a coloured glow on the floor below.
+const GLOW = { sky: '#eef3ff', mint: '#effff6', coral: '#fff1ee', sun: '#fff8e6', violet: '#f4eeff' };
+const HALO = { sky: '#5b6dff', mint: '#3fc9a0', coral: '#ff4f7b', sun: '#ff9b4a', violet: '#8a5cff' };
 const C = {
-  bg: 0xe9f1ec,
-  car: 0xf26a4b,
-  carDeep: 0xc94d33,
-  ink: 0x2b3640,
+  bg: 0x140d22,
+  car: 0xe8344e,
+  carDeep: 0xa01f3a,
+  ink: 0x2a2030,
   cream: 0xfff8ec,
   glass: 0x3b5666,
   lamp: 0xfff1b8,
@@ -29,14 +32,14 @@ const C = {
   good: 0x2fae6f,
   miss: 0xf2a922,
   edge: 0xeadfcd,
-  curb: 0xf26a4b,
+  curb: 0xe8344e,
 };
 const THEMES = {
-  lake: { ground: '#bfe2b1', deep: '#a9d59c', light: '#d3ecc5', side: 0xe6d6b8, foliage: [0x7cc47b, 0x62b06c, 0x9bd48a], trunk: 0x9b7653, flowers: [0xffffff, 0xffe08a, 0xa9d8f5], rocks: [0xc9c4b6, 0xb9b3a3], water: 0x8fd0ee, kinds: { tree: 1, bush: 1, pond: 1 } },
-  forest: { ground: '#a9d69c', deep: '#92c886', light: '#c0e3b2', side: 0xdcc8a4, foliage: [0x3f9a63, 0x2f8556, 0x58b075], trunk: 0x8a6446, flowers: [0xffffff, 0xf7c6d9, 0xffe08a], rocks: [0xb8b8aa, 0xa5a598], kinds: { pine: 1, tree: 0.4, bush: 1 } },
-  canyon: { ground: '#f2d3a6', deep: '#e9c08d', light: '#f8e2c0', side: 0xe2a77c, foliage: [0x7fb36a, 0x69a35c, 0x8cc277], trunk: 0x9b7653, flowers: [0xff8a6b, 0xffd36b, 0xffffff], rocks: [0xe08e64, 0xd47a52, 0xeaa57d], kinds: { cactus: 1, mesa: 0.35, rock: 1 } },
-  beach: { ground: '#f6e6b9', deep: '#efd99f', light: '#fbf0d2', side: 0xe9cf9a, foliage: [0x5dbb7a, 0x47a768, 0x7acb8c], trunk: 0xb08860, flowers: [0xff9a8a, 0xffffff, 0x8fd3e8], rocks: [0xd9cdb4, 0xc9bb9f], water: 0x7fd6e3, kinds: { palm: 1, umbrella: 1, pond: 1 } },
-  park: { ground: '#bce0ab', deep: '#a5d396', light: '#d2ebc3', side: 0xe2d1b0, foliage: [0x6fbf72, 0x4fa866, 0xf5b3c8], trunk: 0x8f6a4c, flowers: [0xffffff, 0xffd36b, 0xf5b3c8], rocks: [0xc4c0b2, 0xb3ae9e], kinds: { tree: 1, pine: 0.5, bush: 1 } },
+  lake: { ground: '#e98aa6', deep: '#de7395', light: '#f6a8bd', side: 0x4a2552, foliage: [0xff7aa8, 0xe95a8c, 0xffa3c4], trunk: 0x6b3a52, flowers: [0xffffff, 0xffd27a, 0xb8a6ff], rocks: [0xc89bb4, 0xb3839f], water: 0x6a66ff, kinds: { tree: 1, bush: 1, pond: 1 } },
+  forest: { ground: '#d9667e', deep: '#c9536d', light: '#e88398', side: 0x431f4c, foliage: [0x8b3fa8, 0x6f2f8f, 0xb15ac8], trunk: 0x5a2f45, flowers: [0xffffff, 0xffc2e0, 0xffd27a], rocks: [0xb07a96, 0x9b6784], kinds: { pine: 1, tree: 0.4, bush: 1 } },
+  canyon: { ground: '#f59a6e', deep: '#ec845c', light: '#fbb48a', side: 0x5a2a4a, foliage: [0xff8f6b, 0xf2715a, 0xffb07a], trunk: 0x6b3a3a, flowers: [0xffe27a, 0xffffff, 0xff6f91], rocks: [0xd9604f, 0xc44c42, 0xe8806a], kinds: { cactus: 1, mesa: 0.35, rock: 1 } },
+  beach: { ground: '#f8b585', deep: '#f2a06f', light: '#fdc9a0', side: 0x56294f, foliage: [0xff7f9e, 0xf0607f, 0xffa0b6], trunk: 0x7a4652, flowers: [0xffffff, 0xffe27a, 0x9fd0ff], rocks: [0xe0a58e, 0xcc8f78], water: 0x5fa8ff, kinds: { palm: 1, umbrella: 1, pond: 1 } },
+  park: { ground: '#f2876f', deep: '#e6725d', light: '#f9a189', side: 0x4f2650, foliage: [0xff6f8f, 0xe84a6f, 0xffa27a], trunk: 0x6b3846, flowers: [0xffffff, 0xffd27a, 0xc8b0ff], rocks: [0xc98a96, 0xb37682], kinds: { tree: 1, pine: 0.5, bush: 1 } },
 };
 
 function seeded(seed) {
@@ -65,13 +68,14 @@ function canvasTex(w, h, draw, { repeat = false, srgb = true } = {}) {
 const tex = {};
 function gridTexture() {
   return (tex.grid ||= canvasTex(256, 256, (g, w) => {
-    g.fillStyle = '#e3ede7';
+    g.fillStyle = '#160e26';
     g.fillRect(0, 0, w, w);
-    g.strokeStyle = 'rgba(110,150,140,0.28)';
+    g.strokeStyle = 'rgba(120,90,255,0.22)';
     g.lineWidth = 2;
     g.strokeRect(0, 0, w, w);
-    g.strokeStyle = 'rgba(80,140,125,0.5)';
-    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(112,78,255,0.95)';
+    g.lineWidth = 3.5;
+    g.lineCap = 'round';
     for (const x of [64, 192]) for (const y of [64, 192]) {
       g.beginPath();
       g.moveTo(x - 6, y - 6);
@@ -85,7 +89,7 @@ function gridTexture() {
 function roadTexture() {
   // Light paving stones in staggered rows.
   return (tex.road ||= canvasTex(128, 256, (g, w, h) => {
-    g.fillStyle = '#f4ede1';
+    g.fillStyle = '#f6d3c4';
     g.fillRect(0, 0, w, h);
     const r = seeded(5);
     for (let row = 0; row < 8; row++) {
@@ -93,7 +97,7 @@ function roadTexture() {
       const off = row % 2 ? 16 : 0;
       for (let x = -32 + off; x < w; x += 32) {
         const tone = 236 + Math.floor(r() * 10);
-        g.fillStyle = `rgb(${tone + 8},${tone + 2},${tone - 10})`;
+        g.fillStyle = `rgb(${tone + 14},${tone - 14},${tone - 26})`;
         g.beginPath();
         g.roundRect(x + 1.5, y + 1.5, 29, 29, 5);
         g.fill();
@@ -332,16 +336,16 @@ function buildIsland(group, track, outline, theme, accentName) {
     const s = 256 / size;
     ctx.translate(128 - b.cx * s, 128 - b.cy * s);
     ctx.filter = 'blur(18px)';
-    ctx.fillStyle = GLOW[accentName];
+    ctx.fillStyle = HALO[accentName];
     ctx.beginPath();
     outline.forEach(([x, y], i) => (i ? ctx.lineTo(x * s, y * s) : ctx.moveTo(x * s, y * s)));
     ctx.closePath();
     ctx.lineWidth = 60 * s * 4;
-    ctx.strokeStyle = GLOW[accentName];
+    ctx.strokeStyle = HALO[accentName];
     ctx.stroke();
     ctx.fill();
   });
-  const haloMesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: halo, transparent: true, opacity: 0.85, depthWrite: false }));
+  const haloMesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: halo, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }));
   haloMesh.rotation.x = -Math.PI / 2;
   haloMesh.position.set(b.cx, GRID_Y + 1, b.cy);
   group.add(haloMesh);
@@ -861,9 +865,9 @@ export function createWorld(canvas, { mode = 'chase', track = raceTrack('gp'), i
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(C.bg);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0xd8cdb4, 1.5);
+  const hemi = new THREE.HemisphereLight(0xffd9ec, 0x5a2a5e, 1.35);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff3df, 2.1);
+  const sun = new THREE.DirectionalLight(0xffd2b0, 2.2);
   sun.castShadow = true;
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.6;
@@ -933,7 +937,7 @@ export function createWorld(canvas, { mode = 'chase', track = raceTrack('gp'), i
     const accentName = ACCENT[track.color] ? track.color : 'violet';
     accent = ACCENT[accentName];
     outline = islandOutline(track, 320);
-    hemi.groundColor.set(THEMES[theme].ground);
+    hemi.groundColor.set(THEMES[theme].side);
     buildIsland(group, track, outline, theme, accentName);
     buildRoad(group, track, theme);
     buildArches(group, track, accent);
