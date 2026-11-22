@@ -2043,7 +2043,11 @@ for (const [id, key, k] of [['mc-speed', 'speed', 100], ['mc-turn', 'turn', 100]
 document.querySelector('.mc-tests').addEventListener('click', (e) => {
   const b = e.target.closest('[data-test]');
   if (!b || !mc.connected) return;
-  if (b.dataset.test === 'fwd') {
+  if (b.dataset.test === 'direct') {
+    const note = $('mc-test-note');
+    note.textContent = 'Sending forward to both wheels…';
+    testWheels(1, 1, 500, message => { note.textContent = message; });
+  } else if (b.dataset.test === 'fwd') {
     const w = wheelMix(1, 0, S.tune);
     testWheels(w.l, w.r, 1000);
     $('mc-test-note').textContent = `Forward 1 s at ${Math.round(w.l * 100)}% power: about ${Math.round(w.l * REAL_CAR.topCmS)} cm.`;

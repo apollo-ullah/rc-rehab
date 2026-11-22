@@ -83,6 +83,7 @@ export async function connect() {
     if (!s) throw new Error('This board only reads one arm. Flash firmware/MuscleCar for two biceps.');
     maskCh = await svc.getCharacteristic(uuid('52')).catch(() => null);
     powerCh = await svc.getCharacteristic(uuid('54')).catch(() => null);
+    if (!maskCh && !powerCh) throw new Error('Sensor stream found, but wheel controls are unavailable. Disconnect and reconnect the board.');
     samples = s;
     samples.addEventListener('characteristicvaluechanged', receive);
     await samples.startNotifications();
@@ -122,8 +123,8 @@ export function setWheels(l, r) {
   want = { l, r, at: performance.now() };
 }
 // Drive the wheels for a fixed time, for the test buttons (the game's own commands wait).
-export function testWheels(l, r, ms) {
-  test = { l, r, until: performance.now() + ms };
+export function testWheels(l, r, ms, onResult) {
+  test = { l, r, until: performance.now() + ms, onResult };
 }
 
 async function tick() {
@@ -131,7 +132,8 @@ async function tick() {
   const now = performance.now();
   let l = 0;
   let r = 0;
-  if (test && now < test.until) ({ l, r } = test);
+  const trial = !document.hidden && test && now < test.until ? test : null;
+  if (trial) ({ l, r } = test);
   else {
     test = null;
     if (!document.hidden && now - want.at < WANT_MS) ({ l, r } = want);
@@ -141,9 +143,12 @@ async function tick() {
   mc.out = { l, r };
   writing = true;
   try {
-    if (powerCh) await powerCh.writeValueWithResponse(Uint8Array.of(Math.round(l * 255), Math.round(r * 255)));
+    if (trial?.onResult && maskCh) await maskCh.writeValueWithResponse(Uint8Array.of(3));
+    else if (powerCh) await powerCh.writeValueWithResponse(Uint8Array.of(Math.round(l * 255), Math.round(r * 255)));
     else await maskCh.writeValueWithResponse(Uint8Array.of((pulse[0].next(l) ? 1 : 0) | (pulse[1].next(r) ? 2 : 0)));
-  } catch {
+    trial?.onResult?.('ESP32 acknowledged the forward command.');
+  } catch (err) {
+    trial?.onResult?.('Wheel write failed: ' + err.message);
     // The next tick tries again. The board releases the buttons by itself after 300 ms.
   } finally {
     writing = false;
