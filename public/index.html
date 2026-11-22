@@ -17,20 +17,76 @@
   <canvas id="world" aria-hidden="true"></canvas>
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
-  <!-- 1. Welcome -->
-  <section class="screen active" id="s-name">
+  <!-- 0. Choose: the arcade or your own practice path -->
+  <section class="screen active" id="s-choose">
     <div class="panel sheet welcome">
       <p class="hand tilt">welcome to</p>
+      <h1 class="title">Head Racer</h1>
+      <p>Steer with your head and go with a face move. A real RC car drives along with you. Pick how you want to play.</p>
+      <nav class="modes" aria-label="Choose a mode">
+        <a class="mode c-coral" href="/arcade">
+          <span class="mode-icon" data-icon="trophy"></span>
+          <span class="mode-text">
+            <b>Arcade</b>
+            <span>Race the Grand Prix and get your time on the shared leaderboard. Type a name and play.</span>
+            <small id="c-top" class="hidden"></small>
+          </span>
+          <span class="mode-go" data-icon="right"></span>
+        </a>
+        <a class="mode" href="/path">
+          <span class="mode-icon" data-icon="map"></span>
+          <span class="mode-text">
+            <b>Practice path</b>
+            <span>Short daily head and face lessons on a roadmap. Your progress is saved on this device.</span>
+          </span>
+          <span class="mode-go" data-icon="right"></span>
+        </a>
+      </nav>
+      <p class="fine">Practise seated with good support. A practice tool to use alongside therapy, not a medical device.</p>
+    </div>
+  </section>
+
+  <!-- 1. Practice path: your name -->
+  <section class="screen" id="s-name">
+    <div class="panel sheet welcome">
+      <p class="hand tilt">practice path</p>
       <h1 class="title">Head Racer</h1>
       <p>Short daily head and face exercises. Every lesson is its own little course: open each gate with your move, then drive on to the finish line.</p>
       <div class="field">
         <label for="name">Your name</label>
         <input id="name" type="text" maxlength="20" autocomplete="off" autocapitalize="words" enterkeyhint="go" placeholder="Type your name" />
-        <p class="hint">Your progress is saved under this name, so you can carry on from any phone.</p>
+        <p class="hint">Your roadmap is saved in this browser. No account needed: come back on this phone and pick up where you left off.</p>
       </div>
       <p class="error hidden" id="name-error" role="alert"></p>
       <button class="btn primary" id="btn-name"><span>Let's go</span></button>
       <p class="fine">Practise seated with good support. A practice tool to use alongside therapy, not a medical device.</p>
+      <p class="fine"><a href="/">Back</a> · Want a quick race for the leaderboard instead? <a href="/arcade">Arcade</a></p>
+    </div>
+  </section>
+
+  <!-- 1b. Arcade: the event laptop. One person after another, Grand Prix times go on the leaderboard -->
+  <section class="screen" id="s-arcade">
+    <div class="panel sheet welcome arcade">
+      <p class="hand tilt">arcade</p>
+      <h1 class="title">Head Racer</h1>
+      <p>Steer the Grand Prix with your head, go with a face move, and set the fastest time. Everyone drives at full speed with no help, so the times are fair. <span id="a-car"></span></p>
+      <div class="field">
+        <label for="a-name">Your name for the leaderboard</label>
+        <input id="a-name" type="text" maxlength="20" autocomplete="off" autocapitalize="words" enterkeyhint="go" placeholder="Type your name" />
+      </div>
+      <p class="error hidden" id="a-error" role="alert"></p>
+      <button class="btn primary huge" id="btn-a-play"><span data-icon="play">Play</span></button>
+      <div class="lb-wrap">
+        <div>
+          <h3 class="small-head lb-head" data-icon="trophy">Fastest Grand Prix</h3>
+          <ol class="lb" id="a-fastest"><li class="empty">No times yet. Be the first.</li></ol>
+        </div>
+        <div>
+          <h3 class="small-head lb-head" data-icon="up">Most improved</h3>
+          <ol class="lb" id="a-improved"><li class="empty">Race twice to show up here.</li></ol>
+        </div>
+      </div>
+      <p class="fine"><a href="/">Back</a> · Looking for the daily lessons? <a href="/path">Practice path</a></p>
     </div>
   </section>
 
@@ -274,6 +330,8 @@
       <p id="res-detail"></p>
       <h3 class="small-head" id="res-stats-title">Your workout</h3>
       <div class="facts" id="res-stats"></div>
+      <h3 class="small-head lb-head hidden" id="res-board-title" data-icon="trophy">Leaderboard</h3>
+      <ol class="lb hidden" id="res-board"></ol>
       <button class="btn primary" id="btn-res-path"><span data-icon="map">Back to the roadmap</span></button>
       <button class="btn quiet" id="btn-again"><span>Race again</span></button>
     </div>

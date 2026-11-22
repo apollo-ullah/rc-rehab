@@ -331,14 +331,79 @@ function idealSignals(w, v) {
   return s;
 }
 
+// ---------- 3c. Moving the game to another server mid-turn (the cloud does this) ----------
+{
+  const { createArena } = await import('../server/arena.js');
+  const store = { results: [], practice: [], addResult: (e) => store.results.push(e), addPractice: (e) => store.practice.push(e), reset() {} };
+  const fake = () => {
+    const c = { open: true, inbox: [], send: (t) => c.inbox.push(t), close: () => (c.open = false) };
+    return c;
+  };
+  const got = (c, t) => c.inbox.filter((s) => s.startsWith('{') && JSON.parse(s).t === t).map((s) => JSON.parse(s));
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  const opts = { store, carToken: 'x', adminKey: 'k', log: () => {} };
+  const join = (arena, id) => {
+    const c = fake();
+    const h = arena.connect(c, 'web');
+    h.message(JSON.stringify({ t: 'hello', role: 'player', id }));
+    return { c, h };
+  };
+
+  // Handover during the countdown: the new server still says GO on time.
+  const a = createArena(opts);
+  const p1 = join(a);
+  const id = got(p1.c, 'hello')[0].id;
+  p1.h.message(JSON.stringify({ t: 'join', name: 'Ana', assist: 0 }));
+  p1.h.message(JSON.stringify({ t: 'start' }));
+  const snap1 = JSON.parse(JSON.stringify(a.snapshot()));
+  a.dispose();
+  const b = createArena(opts);
+  b.restore(snap1);
+  const p2 = join(b, id);
+  await pause(3300);
+  check(got(p2.c, 'hello')[0].driving === 'countdown' && got(p2.c, 'go').length === 1, 'A countdown carries on after the game moves to another server');
+
+  // Handover mid-race: the run keeps going and the finish is saved.
+  const snap2 = JSON.parse(JSON.stringify(b.snapshot()));
+  b.dispose();
+  const c = createArena(opts);
+  c.restore(snap2);
+  const p3 = join(c, id);
+  p3.h.message(JSON.stringify({ t: 'finish', rawMs: 400, stars: 0, stats: {} }));
+  check(got(p3.c, 'hello')[0].driving === 'racing' && got(p3.c, 'result').length === 1 && store.results.length === 1, 'A race in progress carries on after the game moves to another server');
+  c.dispose();
+
+  // Handover while it's someone's turn: they keep the turn, with time left to press start.
+  const d = createArena(opts);
+  const q1 = join(d, id);
+  q1.h.message(JSON.stringify({ t: 'join', name: 'Ana', assist: 0 }));
+  const snap3 = JSON.parse(JSON.stringify(d.snapshot()));
+  d.dispose();
+  const e = createArena(opts);
+  e.restore(snap3);
+  const q2 = join(e, id);
+  const turn = got(q2.c, 'your_turn')[0];
+  check(got(q2.c, 'hello')[0].driving === 'claim' && turn?.claimMs > 10000, 'Your turn survives the game moving to another server');
+  e.dispose();
+}
+
 // ---------- 4. Server ----------
+// SIM_URL=http://localhost:4001 runs these checks against a server that is already running, e.g. the
+// cloud build (test/cloud-dev.js) with CAR_TOKEN=letsgo, ADMIN_KEY=testkey and an empty Redis.
+// SIM_URL2 puts the car and the big screen on a second instance, like Vercel can.
+const REMOTE = process.env.SIM_URL?.replace(/\/$/, '');
 const PORT = 3999;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-race-'));
-const srv = spawn(process.execPath, ['server.js'], {
+const srv = REMOTE ? null : spawn(process.execPath, ['server.js'], {
   env: { ...process.env, PORT: String(PORT), NO_TUNNEL: '1', RESULTS_FILE: path.join(tmp, 'r.json'), ADMIN_KEY: 'testkey' },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
-await new Promise((res) => srv.stdout.on('data', (d) => String(d).includes('running') && res()));
+if (srv) await new Promise((res) => srv.stdout.on('data', (d) => String(d).includes('running') && res()));
+const base = REMOTE || `http://localhost:${PORT}`;
+const wsBase = base.replace(/^http/, 'ws');
+const CAR = process.env.SIM_CAR_TOKEN || 'letsgo';
+const ADMIN = process.env.SIM_ADMIN_KEY || 'testkey';
+const wsBase2 = (process.env.SIM_URL2?.replace(/\/$/, '') || base).replace(/^http/, 'ws');
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 function client(url) {
@@ -359,26 +424,26 @@ function client(url) {
 const isT = (t) => (s) => s.startsWith('{') && JSON.parse(s).t === t;
 
 try {
-  const rogue = new WebSocket(`ws://localhost:${PORT}/car?token=wrong`);
+  const rogue = new WebSocket(`${wsBase}/api/car?token=wrong`);
   const rejected = await new Promise((r) => { rogue.on('error', () => r(true)); rogue.on('open', () => r(false)); });
   check(rejected, 'Car connection with the wrong token is refused');
 
-  const car = client(`ws://localhost:${PORT}/car?token=letsgo`);
+  const car = client(`${wsBase2}/api/car?token=${CAR}`);
   await car.open;
-  const screen = client(`ws://localhost:${PORT}/ws`);
+  const screen = client(`${wsBase2}/api/ws`);
   await screen.open;
-  screen.ws.send(JSON.stringify({ t: 'hello', role: 'screen', admin: 'testkey' }));
+  screen.ws.send(JSON.stringify({ t: 'hello', role: 'screen', admin: ADMIN }));
   check(!!(await screen.until((s) => isT('hello')(s) && JSON.parse(s).admin === true)), 'Big screen gets host controls with the admin key');
   check(!!(await screen.until((s) => isT('lobby')(s) && JSON.parse(s).carOnline)), 'Big screen sees the car online');
 
-  const phone = client(`ws://localhost:${PORT}/ws`);
+  const phone = client(`${wsBase}/api/ws`);
   await phone.open;
   phone.ws.send(JSON.stringify({ t: 'hello', role: 'player' }));
   await phone.until(isT('hello'));
-  phone.ws.send(JSON.stringify({ t: 'join', name: '  Sam  ', assist: 1 }));
+  phone.ws.send(JSON.stringify({ t: 'join', name: '  Sam  ', assist: 0 }));
   check(!!(await phone.until(isT('your_turn'))), 'Player joins and gets their turn');
 
-  const phone2 = client(`ws://localhost:${PORT}/ws`);
+  const phone2 = client(`${wsBase}/api/ws`);
   await phone2.open;
   phone2.ws.send(JSON.stringify({ t: 'hello', role: 'player' }));
   phone2.ws.send(JSON.stringify({ t: 'join', name: 'Alex', assist: 0 }));
@@ -403,24 +468,40 @@ try {
   const res = JSON.parse(await phone.until(isT('result')));
   check(res.stars === 1 && res.rank === 1 && res.personalBest, `Result saved: ${res.finalMs} ms, rank ${res.rank}`);
   const board = JSON.parse(await screen.until((s) => isT('board')(s) && JSON.parse(s).fastest.length > 0));
-  check(board.fastest[0]?.name === 'Sam' && board.fastest[0].assist === 1, 'Leaderboard shows "Sam" with the assist tag');
+  check(board.fastest[0]?.name === 'Sam' && !board.fastest[0].assist, 'Leaderboard shows "Sam"');
   check(!!(await phone2.until(isT('your_turn'))), 'Next player in line gets their turn');
 
-  // Second player starts, then disconnects mid-race -> car must stop.
+  // Second player starts, then their connection drops mid-race -> car must stop.
+  const id2 = JSON.parse(phone2.inbox.find(isT('hello'))).id;
   phone2.ws.send(JSON.stringify({ t: 'start' }));
   await phone2.until(isT('go'), 5000);
   phone2.ws.send(JSON.stringify({ t: 'state', x: 150, y: 800, h: -1.57, cs: 0, ct: 1, stars: [] }));
   await wait(100);
   phone2.ws.terminate();
   car.inbox.length = 0;
-  await wait(300);
+  await wait(REMOTE ? 700 : 300);
   // A drive command already in flight when the phone dropped may still land; after the first stop, nothing else may.
+  // In the cloud the host may notice the drop late, so the "phone went quiet" rule stops the car instead (0.4 s).
   const firstStop = car.inbox.indexOf('d 0 0');
-  check(firstStop >= 0 && firstStop <= 1 && car.inbox.slice(firstStop).every((m) => m === 'd 0 0'), 'Driver disconnect mid-race stops the car');
-  check(!!(await screen.until((s) => isT('run_end')(s) && JSON.parse(s).reason === 'disconnected')), 'Big screen shows the run ended');
+  check(firstStop >= 0 && (REMOTE || firstStop <= 1) && car.inbox.slice(firstStop).every((m) => m === 'd 0 0'), `Driver disconnect mid-race stops the car${REMOTE ? ' (within 0.4 s)' : ''}`);
+  // Back within a few seconds (a phone blip, or the cloud moving the connection): the run carries on.
+  const phone2b = client(`${wsBase}/api/ws`);
+  await phone2b.open;
+  phone2b.ws.send(JSON.stringify({ t: 'hello', role: 'player', id: id2 }));
+  const back = JSON.parse(await phone2b.until(isT('hello')));
+  car.inbox.length = 0;
+  for (let i = 0; i < 8; i++) {
+    phone2b.ws.send(JSON.stringify({ t: 'state', x: 150, y: 800, h: -1.57, cs: 0.2, ct: 0.5, stars: [] }));
+    await wait(50);
+  }
+  check(back.driving === 'racing' && car.inbox.includes('d 200 500'), 'A driver whose connection blips gets back into their run');
+  // Gone for good: the run ends after the grace period.
+  phone2b.ws.terminate();
+  // In the cloud the host notices a vanished phone a few seconds late (its pings go unanswered), then the grace period runs.
+  check(!!(await screen.until((s) => isT('run_end')(s) && JSON.parse(s).reason === 'disconnected', REMOTE ? 16000 : 10000)), 'Big screen shows the run ended when the driver does not come back');
 
   // Sam races again, slower then faster -> most improved.
-  phone.ws.send(JSON.stringify({ t: 'join', name: 'sam', assist: 1 }));
+  phone.ws.send(JSON.stringify({ t: 'join', name: 'sam', assist: 0 }));
   await phone.until((s) => isT('your_turn')(s) && phone.inbox.filter(isT('your_turn')).length >= 2, 8000);
   phone.inbox.length = 0;
   phone.ws.send(JSON.stringify({ t: 'start' }));
@@ -429,9 +510,11 @@ try {
   phone.ws.send(JSON.stringify({ t: 'finish', rawMs: 100, stars: 0, stats: {} }));
   const res2 = JSON.parse(await phone.until(isT('result')));
   check(res2.rawMs >= 0 && res2.rawMs < 1000, `Phone timer is sanity-checked against the server (${res2.rawMs} ms)`);
-  const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'r.json'), 'utf8'));
-  check(saved.length === 2 && saved.every((r) => r.key === 'sam'), 'Results persisted to disk; names match case-insensitively');
-  const gpBest = Math.min(...saved.map((r) => r.finalMs));
+  if (!REMOTE) {
+    const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'r.json'), 'utf8'));
+    check(saved.length === 2 && saved.every((r) => r.key === 'sam'), 'Results persisted to disk; names match case-insensitively');
+  }
+  const gpBest = Math.min(res.finalMs, res2.finalMs);
 
   // Boss race: same queue and car, but kept off the Grand Prix leaderboard.
   phone.inbox.length = 0;
@@ -468,22 +551,42 @@ try {
   check(robin.xp === 20 && pb2.feed[0].text === 'cleared Kiss Boost on a phone' && !screen.inbox.some((m) => isT('board')(m)),
     'Phone-only races log practice (capped) and stay off the leaderboard');
 
-  // Profiles and the therapist CSV.
-  const base = `http://localhost:${PORT}`;
-  const post = (body) => fetch(`${base}/api/profile`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
-  await post({ name: 'Sam', profile: { xp: 50, updatedAt: 2000 } });
-  await post({ name: 'sam', profile: { xp: 10, updatedAt: 1000 } });
-  const got = await fetch(`${base}/api/profile?name=SAM`).then((r) => r.json());
-  const missing = await fetch(`${base}/api/profile?name=nobody`).then((r) => r.json());
-  check(got.xp === 50 && missing === null, 'Profiles save by name, and an older copy never overwrites a newer one');
+  // A Grand Prix with driving help counts for the player but stays off the (no-help) leaderboard.
+  const kim = client(`${wsBase}/api/ws`);
+  await kim.open;
+  kim.ws.send(JSON.stringify({ t: 'hello', role: 'player' }));
+  kim.ws.send(JSON.stringify({ t: 'join', name: 'Kim', assist: 2 }));
+  await kim.until(isT('your_turn'), 8000);
+  kim.ws.send(JSON.stringify({ t: 'start' }));
+  await kim.until(isT('go'), 5000);
+  await wait(200);
+  screen.inbox.length = 0;
+  kim.ws.send(JSON.stringify({ t: 'finish', rawMs: 50, stars: 0, stats: {} }));
+  const kimRes = JSON.parse(await kim.until(isT('result')));
+  const b3 = JSON.parse(await screen.until(isT('board')));
+  check(kimRes.rank === null && kimRes.personalBest && !b3.fastest.some((r) => r.name === 'Kim'), 'Times with driving help stay off the leaderboard');
+  kim.ws.close();
+
+  // The therapist CSV.
   const denied = await fetch(`${base}/api/practice.csv`);
-  const csv = await fetch(`${base}/api/practice.csv?admin=testkey`).then((r) => r.text());
+  const csv = await fetch(`${base}/api/practice.csv?admin=${ADMIN}`).then((r) => r.text());
   check(denied.status === 403 && csv.startsWith('date,time,name,unit') && csv.includes('Boss: Mouth Pedal') && csv.includes('Boss: Kiss Boost (phone)') && csv.includes("'=HYPERLINK(1)"),
     'Practice CSV needs the host key and defuses spreadsheet formulas in names');
   await wait(400);
-  check(fs.existsSync(path.join(tmp, 'practice.json')) && fs.existsSync(path.join(tmp, 'profiles.json')), 'Practice log and profiles are saved to disk');
+  if (!REMOTE) check(fs.existsSync(path.join(tmp, 'practice.json')), 'Practice log is saved to disk');
+
+  // Host-only reset. A player can't do it; the host can.
+  phone.ws.send(JSON.stringify({ t: 'admin', action: 'reset_board' }));
+  await wait(REMOTE ? 800 : 300);
+  const stillThere = await fetch(`${base}/api/practice.csv?admin=${ADMIN}`).then((r) => r.text());
+  screen.inbox.length = 0;
+  screen.ws.send(JSON.stringify({ t: 'admin', action: 'reset_board' }));
+  const emptied = JSON.parse(await screen.until((s) => isT('board')(s)));
+  await wait(REMOTE ? 800 : 200);
+  const csvAfter = await fetch(`${base}/api/practice.csv?admin=${ADMIN}`).then((r) => r.text());
+  check(stillThere.split('\n').length > 1 && emptied.fastest.length === 0 && csvAfter.split('\n').length === 1, 'Only the host can clear the leaderboard and practice log');
 } finally {
-  srv.kill();
+  srv?.kill();
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');

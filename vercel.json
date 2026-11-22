@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/arcade", "destination": "/" },
+    { "source": "/path", "destination": "/" },
+    { "source": "/qr.svg", "destination": "/api/qr" },
+    { "source": "/api/practice.csv", "destination": "/api/practice" }
+  ],
+  "functions": {
+    "api/ws.js": { "maxDuration": 300 },
+    "api/car.js": { "maxDuration": 300 }
+  }
+}

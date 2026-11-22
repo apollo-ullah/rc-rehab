@@ -1,6 +1,6 @@
 // Head Racer — ESP32 firmware
 //
-// The laptop server sends "d <steer> <throttle>" about 20 times a second
+// The game server sends "d <steer> <throttle>" about 20 times a second
 // (each -1000..1000). This sketch turns that into button presses on the
 // original RC controller:
 //   - Throttle: the FORWARD button is pulsed quickly. 40% throttle = pressed 40% of the time,
@@ -17,9 +17,18 @@
 // ================= 1. NETWORK — change these =================
 const char* WIFI_SSID = "YOUR_WIFI_NAME";
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
-const char* SERVER_HOST = "192.168.1.50";  // laptop IP: `npm start` prints it
-const uint16_t SERVER_PORT = 3000;
-const char* CAR_PATH = "/car?token=letsgo";  // must match CAR_TOKEN on the server
+
+// Where the game runs. Pick ONE of the two blocks.
+// A) Cloud (the web app on Vercel): any WiFi with internet works.
+const bool USE_TLS = true;
+const char* SERVER_HOST = "YOUR-APP.vercel.app";  // the app's address, no https://
+const uint16_t SERVER_PORT = 443;
+const char* CAR_PATH = "/api/car?token=YOUR_CAR_TOKEN";  // must match CAR_TOKEN in Vercel
+// B) Laptop (`npm start`): ESP32 and laptop on the same WiFi.
+// const bool USE_TLS = false;
+// const char* SERVER_HOST = "192.168.1.50";  // laptop IP: `npm start` prints it
+// const uint16_t SERVER_PORT = 3000;
+// const char* CAR_PATH = "/car?token=letsgo";  // must match CAR_TOKEN on the laptop
 
 // ================= 2. PINS — the GPIOs wired to each button =================
 // Avoid GPIO 0, 2, 5, 12, 15 (boot pins) and 6–11 (flash) on a classic ESP32.
@@ -48,6 +57,7 @@ const uint32_t FAILSAFE_MS = 300;
 WebSocketsClient ws;
 float cmdSteer = 0, cmdThr = 0;  // -1..1
 uint32_t lastCmdMs = 0;
+bool reconnectNow = false;  // server asked for a fresh connection (the cloud closes old ones)
 uint32_t holdUntilMs = 0;  // serial test commands hold this long
 int forcedPin = -1;        // serial single-button test
 
@@ -130,7 +140,9 @@ void onWs(WStype_t type, uint8_t* payload, size_t length) {
       memcpy(buf, payload, n);
       buf[n] = 0;
       int s, t;
-      if (sscanf(buf, "d %d %d", &s, &t) == 2) {
+      if (n == 1 && buf[0] == 'r') {
+        reconnectNow = true;  // a race is about to start: reconnect now so the link lasts the race
+      } else if (sscanf(buf, "d %d %d", &s, &t) == 2) {
         cmdSteer = s / 1000.0f;
         cmdThr = t / 1000.0f;
         lastCmdMs = millis();
@@ -195,7 +207,10 @@ void setup() {
   }
   Serial.printf("\nWiFi OK, ESP32 IP %s\n", WiFi.localIP().toString().c_str());
 
-  ws.begin(SERVER_HOST, SERVER_PORT, CAR_PATH);
+  // TLS here encrypts the link but does not pin the server certificate.
+  if (USE_TLS) ws.beginSSL(SERVER_HOST, SERVER_PORT, CAR_PATH);
+  else ws.begin(SERVER_HOST, SERVER_PORT, CAR_PATH);
+  Serial.printf("Connecting to %s%s:%u\n", USE_TLS ? "wss://" : "ws://", SERVER_HOST, SERVER_PORT);
   ws.onEvent(onWs);
   ws.setReconnectInterval(1000);
   ws.enableHeartbeat(5000, 2000, 2);
@@ -203,6 +218,11 @@ void setup() {
 
 void loop() {
   ws.loop();
+  if (reconnectNow) {
+    reconnectNow = false;
+    Serial.println("[ws] refreshing the connection before the race");
+    ws.disconnect();  // releases the buttons; the library reconnects within a second
+  }
   handleSerial();
   uint32_t now = millis();
   bool serialHold = now < holdUntilMs;

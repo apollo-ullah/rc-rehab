@@ -1,0 +1,5 @@
+data/
+firmware/
+test/
+.env*
+server.js

@@ -1,13 +1,50 @@
 # Head Racer
 
-A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. Players scan a QR code, type their name and pick from a **roadmap** of 24 stops: four units (head steady, left and right, jaw, lips) of five lessons and a boss race each, plus the Grand Prix. Every lesson is its own little **course**: the car drives itself to a gate, you do the exercise to open it, and the lesson ends when the car crosses the finish line. Each **boss race** drives the real RC car through an ESP32 using only that unit's exercise, and the **Grand Prix** (head steers, face move drives) keeps its leaderboard. Everything is open from day one; the path only suggests an order.
+A Duolingo-style daily practice of head and face exercises, built for people with cerebral palsy and fun for anyone. It's a demo, so there are no accounts. The first screen (`/`) asks which of the two modes you want:
+
+- **Arcade** (`/arcade`): type a name, do the quick face setup and race the **Grand Prix** (head steers, a face move drives). Everyone races with **no driving help**, so times compare. The real RC car drives along through an ESP32 when it's connected. Times go on one **shared, saved leaderboard** (fastest and most improved) that anyone with the link sees, live. "Next player" clears everything for the next person, so it works on the event laptop and on anyone's own phone.
+- **Practice path** (`/path`, on anyone's own phone or computer): a **roadmap** of 24 stops: four units (head steady, left and right, jaw, lips) of five lessons and a boss race each, plus the Grand Prix. Every lesson is its own little **course**: the car drives itself to a gate, you do the exercise to open it, and the lesson ends when the car crosses the finish line. Progress is saved **in that browser only**, so coming back on the same phone picks up where you left off. Everything is open from day one; the path only suggests an order.
 
 ```
-Phones --HTTPS--> Cloudflare tunnel --> Laptop (node server.js) --ws:// on WiFi--> ESP32 --> controller buttons
-Big screen (laptop browser): live course, QR code, queue, leaderboards, STOP button
+Online:  Laptop / phones / big screen --HTTPS--> Vercel (static pages + WebSocket functions) <--wss:// from any WiFi-- ESP32 --> controller buttons
+                                                    |  Redis: leaderboard, practice log, and the live link between instances
+Laptop:  Phones --HTTPS--> Cloudflare quick tunnel --> Laptop (node server.js, JSON files) <--ws:// on WiFi-- ESP32
 ```
 
-## Run it
+The game logic (queue, races, leaderboards, practice log) lives in `server/arena.js` and is the same in both setups. Only the hosting and storage differ.
+
+## Run it online (Vercel)
+
+The app is a Vercel project: static pages from `public/`, plus functions in `api/`. On Vercel the phones, the laptop and the car can each land on a different server instance, so they talk through **Redis** pub/sub (`server/relay.js`). Exactly one instance at a time runs the game; it holds a lock in Redis. If that instance goes away, another one takes over at once and carries on from a saved snapshot: the waiting line, someone's turn, and a race in progress all survive, and messages sent during the switch are held and delivered afterwards. Race results and the practice log are saved in the same Redis.
+
+Set up once (needs a Vercel account; the free Hobby plan works):
+
+```bash
+npm install
+npx vercel link                                # create/link the project
+npx vercel integration add upstash/upstash-kv  # free Redis, connected to the project (adds REDIS_URL / KV_URL)
+npx vercel env add ADMIN_KEY production        # a long random string: host controls + practice CSV
+npx vercel env add CAR_TOKEN production        # another one: the ESP32 must send it to drive
+npx vercel deploy --prod                       # prints the app's link
+```
+
+After a code change, run `npx vercel deploy --prod` again. The saved data stays. Connections that were already open stay on the old version until they reconnect (at most 5 minutes), so for a minute or two the old version may still be running the game.
+
+Live: **https://head-racer.vercel.app** (the first screen offers both modes).
+
+- **Arcade:** `<link>/arcade` skips the choice (handy on the event laptop). Anyone you share the link with can race; there is one line for the one real car, so racers take turns.
+- **Practice path:** `<link>/path` skips the choice.
+- **Big screen:** `<link>/screen?admin=<ADMIN_KEY>`. Without the key it is view-only.
+- **ESP32:** in the firmware use block A: `SERVER_HOST` = the link's host name without `https://`, port 443, and `CAR_PATH "/api/car?token=<CAR_TOKEN>"`. It connects from any WiFi with internet.
+- **Practice CSV:** the link on the big screen when it has the admin key.
+- **Fresh start for a demo:** the big screen's host panel has **Clear leaderboard and practice log** (asks to confirm).
+- **Connection time limit:** Vercel's Hobby plan closes each WebSocket after 5 minutes. Pages and the car reconnect by themselves within a second. When a turn starts, a phone or big screen whose connection is too old to last the turn opens a new one and switches over without a gap, and the car is asked to reconnect, so a race is never cut off.
+- **Connection drops mid-race:** the real car stops at once, and the driver has 6 seconds to come back (the phone reconnects by itself). If it does, the race carries on; if not, the run ends. A finish that doesn't get through is sent again.
+- **Test the cloud build locally:** start Redis (`docker run -d --name hr-redis -p 6390:6379 redis:7-alpine`), then run two "instances" sharing it: `REDIS_URL=redis://localhost:6390 CAR_TOKEN=letsgo ADMIN_KEY=testkey PORT=4001 node test/cloud-dev.js` (and again with `PORT=4002`). `SIM_URL=http://localhost:4001 SIM_URL2=http://localhost:4002 npm test` then runs every server check with the phones on one instance and the car and big screen on the other. Flush Redis first.
+- "Today's practice" on the big screen resets at midnight in `TIME_ZONE` (env var, default `America/Toronto`).
+- Free-plan limits: the Upstash free tier covers a good few demo days of racing. Each race streams about 40 Redis messages a second while it runs.
+
+## Run it on a laptop (offline / no account)
 
 ```bash
 brew install cloudflared   # once: gives phones an HTTPS link (needed for the camera)
@@ -17,26 +54,26 @@ npm start
 
 `npm start` prints:
 - **Big screen URL** (`http://localhost:3000/screen?admin=…`): open it on the laptop or projector. The `admin` key shows the STOP button. Without the key the page is view-only.
-- **Laptop IP**: put it in the firmware as `SERVER_HOST`.
+- **Laptop IP**: put it in the firmware (block B) as `SERVER_HOST`.
 - **Public HTTPS link**: the big screen turns it into a QR code automatically.
 
-The quick-tunnel link changes every time you restart, but the QR code updates by itself.
+The quick-tunnel link changes every time you restart, but the QR code updates by itself. Laptop data is saved in `data/`.
 
-Test without hardware: `npm test` (69 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, and full races through the server with a fake phone and a fake car).
+Test without hardware: `npm test` (74 checks: physics, jumps, head calibration, steering feel, every practice lesson, difficulty changes, gold, streaks, achievements, every race course and all 20 lesson courses driven to the finish, full races through the server with a fake phone and a fake car, and races carrying on when the connection blips or the game moves to another server).
 Test without a camera: on the phone, tap "Use touch controls instead". In lessons, slide sideways for left/right and drag up for face moves. On a laptop, the arrow keys / WASD also work.
-Demo without a face: open `<link>/?autopilot` and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
-No real car? Boss races and the Grand Prix have **Play on this phone**: the same race without the line or the car. It counts for practice and XP and is marked "(phone)" in the CSV, but stays off the leaderboard.
+Demo without a face: open `<link>/?autopilot` (or `<link>/arcade?autopilot`) and pick touch controls. A stand-in player does every lesson rep and drives every race, and the real car mirrors the races. It only drives while nobody else is: as soon as it sees a calibrated face, or a finger or key is down, you are driving. The HUD says "autopilot" while the link has it.
+No real car? In the practice path, boss races and the Grand Prix have **Play on this phone**: the same race without the line or the car. It counts for practice and XP and is marked "(phone)" in the CSV, but stays off the leaderboard. Arcade races always go through the line, so they always count, with or without the car.
 
 ## ESP32 setup
 
 1. Arduino IDE → Library Manager → install **"WebSockets" by Markus Sattler**.
-2. Open `firmware/rc_car/rc_car.ino` and set `WIFI_SSID`, `WIFI_PASS`, `SERVER_HOST` (laptop IP), and the four `PIN_*` GPIOs.
+2. Open `firmware/rc_car/rc_car.ino` and set `WIFI_SSID`, `WIFI_PASS`, the server block (A = online app, B = laptop), and the four `PIN_*` GPIOs.
 3. `DIRECT_WIRING = true` if GPIOs go straight to the active-low button lines. Released = high-impedance, so the controller's own pull-up holds 3.2 V. Use `false` if you drive transistors or optocouplers.
 4. Flash it and open the Serial Monitor at 115200:
    - `f`, `b`, `l`, `r`: press one button for 1 s (check your wiring)
    - `d 0 500`: half throttle straight for 3 s
    - `x`: release everything
-5. With `npm start` running, the big screen should say **Car connected**.
+5. The big screen should say **Car connected** (the Serial Monitor prints the address it is trying).
 
 **How speed is mirrored with on/off buttons:** the forward button is pulsed (every 120 ms). 50% speed on screen means pressed 50% of the time. Tune `SPEED_SCALE` (start around 0.5 indoors), `PULSE_PERIOD_MS` and `MIN_DUTY`. Steering is on/off past `STEER_THRESHOLD` (0.35). Head steering on screen is deliberately gentle, so the phone sends any clear turn (0.15 or more, about 40% of your calibrated head movement) as at least a 0.53 press, and tiny wobbles as 0. Set `STEER_PULSE = true` to try partial turns.
 
@@ -77,7 +114,7 @@ Only the Grand Prix and Curvy Road are steered by your head. The other boss race
 
 **Menu** (top-right button or tap your name): **Progress** has tiles for level, minutes, gates opened, stops done, streak and bosses, a 14-day minutes chart against the goal, each measured range against day 1, and every lesson's level. **Awards** lists the achievements. **Settings** has the daily goal, goal days per week, **Bigger targets** (wider zones and longer dwell, for people with extra involuntary movement), driving help for races, redo head setup, switch between camera and touch, and change name.
 
-**Saved data.** Progress is saved on the phone and on the laptop by name in `data/profiles.json`, so a player can continue on another phone. Names are not accounts: two people typing the same name share progress. Every lesson and race is logged to `data/practice.json`. The big screen shows "Today's practice" (good reps, minutes, top XP, recent activity). The host (with `?admin=`) can download **practice.csv** for a therapist. It has date, name, unit, activity, good reps, XP, minutes, average reaction time, fatigue signs, and whether they stopped tired.
+**Saved data.** Roadmap progress is saved only in the browser it was made in. There are no accounts and nothing personal on the server. Every lesson and race is logged to the practice log. The big screen shows "Today's practice" (good reps, minutes, top XP, recent activity). The host (with `?admin=`) can download **practice.csv** for a therapist. It has date, name, unit, activity, good reps, XP, minutes, average reaction time, fatigue signs, and whether they stopped tired.
 
 **Safety and honesty.** This is a practice tool to use alongside therapy, not a medical device. Practise seated with good support, and stop for pain or dizziness. A therapist should pick which units fit the person. Targets never go past the player's own measured range, and there are no strobe effects. The mouth units are presented as control practice, not as a treatment for speech, drooling or eating, because the evidence for oral-motor exercises is weak. The nod estimate and face scores are approximate. Evidence for head-control games in CP comes from small studies; see the sources below.
 
@@ -97,7 +134,7 @@ Small head movements give small turns: the first 20% of a movement is ignored, a
 
 ## Look
 
-A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in its own colours: each course is a bevelled island with a glowing rim floating over a pale grid, with rounded trees, paved road, red-and-white curbs, chevron boost pads, gates with lifting arms, 3D course lettering and a rounded coral car. Each unit has a theme (lake, forest, canyon, beach, park). Menus show the next course from above, a stop shows its island, lessons and races use a chase camera, and the big screen shows the course being raced. The interface is framed paper panels and square icon buttons with toasts for achievements. Titles are Amatic SC and everything you read is Nunito. Unit colours are sky, mint, coral and sun, with violet for the Grand Prix. Three.js and the fonts load from CDNs, so phones need internet, which the tunnel already requires.
+A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in its own colours: each course is a bevelled island with a glowing rim floating over a pale grid, with rounded trees, paved road, red-and-white curbs, chevron boost pads, gates with lifting arms, 3D course lettering and a rounded coral car. Each unit has a theme (lake, forest, canyon, beach, park). Menus show the next course from above, a stop shows its island, lessons and races use a chase camera, and the big screen shows the course being raced. The interface is framed paper panels and square icon buttons with toasts for achievements. Titles are Amatic SC and everything you read is Nunito. Unit colours are sky, mint, coral and sun, with violet for the Grand Prix. Three.js and the fonts load from CDNs, so phones need internet.
 
 ## Race rules
 
@@ -106,17 +143,17 @@ A light, soft-lit toy world in Three.js, laid out like bruno-simon.com but in it
 - Each star collected takes 2 s off your time. Some stars float above the jumps. Wall hits slow you down.
 - **Jumps and boosts:** chevron pads give a speed burst, and ramps launch the car, with a boost pad before them for a big jump. Jumps never punish: a slow car just rolls off the lip. While the virtual car is in the air it can't steer, so the real car's steering is released too.
 - Wooden crates by the road can be knocked flying. They're just for fun and cost nothing.
-- Driving help: *No help* / *Some help* (slower, steering assist) / *Lots of help* (drives forward by itself). The level is shown as a tag on the leaderboard.
-- Leaderboards: **Fastest Grand Prix** (best time per name) and **Most improved** (first run vs best run). Boss races use different controls, so their times stay off the leaderboard.
+- Driving help (practice path only, in Settings): *No help* / *Some help* (slower, steering assist) / *Lots of help* (drives forward by itself). The arcade is always *No help*.
+- Leaderboards: **Fastest Grand Prix** (best time per name) and **Most improved** (first run vs best run), counting only Grand Prix runs with no help. Races with help still count for your own bests and practice; boss races use different controls, so their times stay off too.
 - The results screen shows exercise stats: head moves, GO reps, GO hold time, jumps, wall bumps.
-- Results are saved in `data/results.json`, practice in `data/practice.json`, progress in `data/profiles.json`. Delete the `data` folder to reset everything.
+- Online, race results and the practice log are saved in Redis. On a laptop they're in `data/results.json` and `data/practice.json`; delete the `data` folder to reset.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
 | ESP32 can't connect to WiFi | The ESP32 can't get through a WiFi login page or enterprise WiFi. Put the laptop and ESP32 on a phone hotspot. |
-| "Car offline" but ESP32 is on WiFi | Check `SERVER_HOST`. Some guest WiFi blocks device-to-device traffic, so use a hotspot. Check the macOS firewall allows node. |
-| Camera doesn't start on the phone | The page must be opened from the `https://…trycloudflare.com` link, not `http://`. On iPhone: Settings → Safari → Camera → Allow. |
+| "Car offline" but ESP32 is on WiFi | Online: check `SERVER_HOST` has no `https://`, port is 443, `USE_TLS = true`, and the token matches the `CAR_TOKEN` secret. Laptop: check `SERVER_HOST`. Some guest WiFi blocks device-to-device traffic, so use a hotspot. Check the macOS firewall allows node. |
+| Camera doesn't start on the phone | The page must be opened from an `https://` link (the app's link, or the `…trycloudflare.com` one on a laptop). On iPhone: Settings → Safari → Camera → Allow. |
 | Face tracking slow on an old phone | Use touch controls, or lend a newer phone. |
 | Real car too fast or drifts too much | Lower `SPEED_SCALE` in the firmware. |

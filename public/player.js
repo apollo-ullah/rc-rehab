@@ -3,7 +3,7 @@ import { HeadTracker, buildCalibration, toIntent, toSignals, rangeFrom, rangeFro
 import {
   UNITS, KINDS, GRAND_PRIX, XP, FACE_SIGS, buildLesson, LessonRun, newProfile, lessonsOf, nodeState, nextNode,
   isGold, difficultyText, recordLesson, recordBoss, addPractice, todayView, weekView, progressLine, levelName,
-  unitIndex, localDay, addDays, newer, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
+  unitIndex, localDay, addDays, unitProgress, pathProgress, xpLevel, achievements, knobFor, rangeRows,
 } from './path.js';
 import { raceTrack, lessonTrack, trackSvgPath, LESSON_GATES } from './tracks.js';
 import { LessonCourse } from './course.js';
@@ -11,6 +11,11 @@ import { mountIcons, iconSvg } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOPILOT = new URLSearchParams(location.search).has('autopilot');
+// Two modes, picked on the first screen (/). Arcade (/arcade): one person after another racing the
+// Grand Prix with no help for the shared leaderboard; nothing personal is kept.
+// Practice path (/path): your own roadmap of lessons, saved in this browser.
+const ARCADE = /^\/arcade\/?$/.test(location.pathname) || new URLSearchParams(location.search).has('arcade');
+const PATH = /^\/path\/?$/.test(location.pathname);
 const video = $('cam');
 const tracker = new HeadTracker(video);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -55,8 +60,11 @@ const S = {
   restTimer: null,
   timers: [],
   carOnline: false,
+  finish: null, // a finish the server hasn't confirmed yet
+  finishRetry: null,
   lineLength: 0,
   lineBusy: false,
+  board: { fastest: [], improved: [] },
 };
 $('name').value = S.name;
 const sensRadio = document.querySelector(`input[name=sens][value="${S.sens}"]`);
@@ -127,25 +135,94 @@ function overlay(text, msg = false) {
 }
 
 // ---------- Server connection ----------
+// `ws` is the socket in use. A new one (`spare`) only replaces it once the server has said hello
+// on it, so swapping connections never leaves a gap. A connection that drops mid-race has a few
+// seconds to come back before the run is called off (the real car stops by itself meanwhile).
 let ws = null;
+let spare = null;
+let connAt = 0;
+let freshMs = 0; // the cloud host cuts connections after a while: replace one older than this before a turn
+let lostTimer = null;
+const pending = []; // messages that must not be lost while reconnecting
+const DROPPED = 'The connection dropped, so your run was stopped.';
+const racingOnline = () => !S.local && (S.phase === 'racing' || S.phase === 'countdown');
+
+function openSocket() {
+  const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws`);
+  sock.onopen = () => sock.send(JSON.stringify({ t: 'hello', role: 'player', id: store.get('rc-id') }));
+  sock.onmessage = (e) => {
+    let m;
+    try {
+      m = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    if (sock !== ws) {
+      if (sock !== spare || m.t !== 'hello') return;
+      const old = ws;
+      ws = sock;
+      spare = null;
+      connAt = Date.now();
+      if (old && old.readyState < 2) old.close(); // the server has moved us over already
+    }
+    onMessage(m);
+  };
+  sock.onclose = () => {
+    if (sock === spare) spare = null;
+    if (sock !== ws) {
+      if (!ws && !spare) setTimeout(connect, 1000); // couldn't connect: try again
+      return;
+    }
+    ws = null;
+    if (racingOnline() || S.phase === 'turn') {
+      clearTimeout(lostTimer);
+      lostTimer = setTimeout(() => !ws && racingOnline() && endLocalRun(DROPPED), 8000);
+      connect();
+    } else {
+      setTimeout(connect, 1000);
+    }
+  };
+  return sock;
+}
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => {
-    send({ t: 'hello', role: 'player', id: store.get('rc-id') });
-    if (S.queued && S.phase === 'waiting') joinQueue();
-  };
-  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-  ws.onclose = () => {
-    if (!S.local && (S.phase === 'racing' || S.phase === 'countdown')) endLocalRun('The connection dropped, so your run was stopped.');
-    setTimeout(connect, 1000);
-  };
+  if (!spare) spare = openSocket();
+}
+// Replace an old connection before a turn so the host's time limit can't cut the race.
+function refreshConnection() {
+  if (ws && !spare && freshMs && Date.now() - connAt > freshMs) spare = openSocket();
 }
 const send = (m) => ws?.readyState === 1 && ws.send(JSON.stringify(m));
+const sendSure = (m) => (ws?.readyState === 1 ? send(m) : pending.push(m));
+
+// The server says hello on every (re)connection, with where our own run stands: catch up with it.
+function onHello(m) {
+  clearTimeout(lostTimer);
+  while (pending.length) send(pending.shift());
+  if (S.local) return;
+  if (S.phase === 'waiting' && S.queued) return joinQueue();
+  if (S.phase === 'turn' && !m.driving) return goWait(); // the turn was lost while away: back in line
+  if (S.phase === 'countdown' || S.phase === 'racing') {
+    if (m.driving === 'claim') send({ t: 'start' }); // our start press never arrived
+    else if (m.driving === 'racing') goNow();
+    else if (!m.driving) endLocalRun(DROPPED);
+  }
+  if (S.finish) {
+    if (m.driving === 'racing') send(S.finish);
+    else if (!m.driving) finishUnsaved();
+  }
+}
 
 function onMessage(m) {
   switch (m.t) {
     case 'hello':
       store.set('rc-id', m.id);
+      freshMs = m.freshMs || 0;
+      onHello(m);
+      break;
+    case 'board':
+      S.board = { fastest: m.fastest || [], improved: m.improved || [] };
+      if (ARCADE && S.phase === 'home') renderArcade();
+      renderChooser();
       break;
     case 'lobby': {
       const was = S.carOnline;
@@ -159,16 +236,24 @@ function onMessage(m) {
         $('wait-pos').textContent = text;
       }
       if ($('s-stop').classList.contains('active')) renderCarStatus();
+      if (ARCADE) renderArcadeCar();
       if (was !== S.carOnline && S.phase === 'home') toast(S.carOnline ? 'The real car is connected' : 'The real car went offline', { icon: 'car' });
       break;
     }
     case 'your_turn':
+      if (S.local) break;
+      if (S.phase === 'countdown') {
+        send({ t: 'start' }); // we pressed start but the server didn't get it
+        break;
+      }
+      if (S.phase === 'racing' || S.phase === 'done') break;
       S.phase = 'turn';
       S.queued = false;
       S.claimEnds = performance.now() + m.claimMs;
       S.holdStart = 0;
       show('s-turn');
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      refreshConnection();
       break;
     case 'countdown':
       if (S.local) break;
@@ -180,6 +265,7 @@ function onMessage(m) {
       break;
     case 'run_end':
       if (S.local) break;
+      stopFinishRetry();
       endLocalRun(
         {
           stopped: 'You stopped the run.',
@@ -192,12 +278,14 @@ function onMessage(m) {
       );
       break;
     case 'result':
-      if (!S.local) showResult(m);
+      if (S.local || !S.finish) break;
+      stopFinishRetry();
+      showResult(m);
       break;
   }
 }
 
-// ---------- Profile: saved on this phone and on the laptop, by name ----------
+// ---------- Profile: saved in this browser only (no accounts) ----------
 const profileKey = (name) => `rc-profile:${name.toLowerCase()}`;
 function loadLocalProfile(name) {
   try {
@@ -206,29 +294,17 @@ function loadLocalProfile(name) {
     return null;
   }
 }
-async function loadProfile(name) {
-  let p = loadLocalProfile(name);
-  try {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 2500);
-    const r = await fetch(`/api/profile?name=${encodeURIComponent(name)}`, { signal: ctl.signal });
-    clearTimeout(timer);
-    if (r.ok) p = newer(p, await r.json());
-  } catch { /* offline: this phone's copy is fine */ }
+function loadProfile(name) {
+  const p = loadLocalProfile(name);
   S.profile = { ...newProfile(name, localDay()), ...(p || {}), name };
   S.assist = ASSIST[S.profile.assist] ? S.profile.assist : 0;
   applySettings();
 }
 function saveProfile() {
   const p = S.profile;
-  if (!p) return;
+  if (!p || ARCADE) return; // arcade players get a throwaway profile
   p.updatedAt = Date.now();
   store.set(profileKey(p.name), JSON.stringify(p));
-  fetch('/api/profile', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: p.name, profile: p }),
-  }).catch(() => {});
 }
 
 function applySettings() {
@@ -261,6 +337,7 @@ onSetting('assist', (v) => (S.assist = S.profile.assist = Number(v)));
 
 // Celebrate achievements that this action completed.
 function withAwards(fn) {
+  if (ARCADE) return fn();
   const before = new Set(achievements(S.profile).filter((a) => a.done).map((a) => a.id));
   const out = fn();
   achievements(S.profile)
@@ -270,7 +347,7 @@ function withAwards(fn) {
 }
 
 // ---------- Step 1: name ----------
-$('btn-name').onclick = async () => {
+$('btn-name').onclick = () => {
   const name = $('name').value.replace(/\s+/g, ' ').trim();
   if (!name) {
     $('name-error').textContent = 'Type a name so your progress can be saved.';
@@ -281,9 +358,8 @@ $('btn-name').onclick = async () => {
   $('name-error').classList.add('hidden');
   S.name = name;
   store.set('rc-name', name);
-  $('btn-name').disabled = true;
-  await loadProfile(name);
-  $('btn-name').disabled = false;
+  loadProfile(name);
+  saveProfile(); // this browser remembers you from the first visit
   if (S.mode === 'touch' || (tracker.lm && S.cal)) return goHome();
   show('s-camera');
 };
@@ -298,7 +374,7 @@ $('btn-camera').onclick = async () => {
     show('s-camera');
     await tracker.start((s) => ($('camera-status').textContent = s));
     keepAwake();
-    runCalibration(goHome);
+    runCalibration(afterSetup);
   } catch (e) {
     console.error(e);
     $('camera-status').textContent = '';
@@ -316,8 +392,13 @@ $('btn-touch').onclick = () => {
   S.mode = 'touch';
   S.cal = null;
   keepAwake();
-  goHome();
+  afterSetup();
 };
+// After the camera setup: the roadmap, or straight into the race in the arcade.
+function afterSetup() {
+  if (ARCADE) startRace('gp');
+  else goHome();
+}
 
 // ---------- Step 3: head setup (and measuring face ranges) ----------
 const CAL_STEPS = [
@@ -342,7 +423,7 @@ function calFail(why, canGoBack) {
   $('cal-error').classList.remove('hidden');
   $('btn-cal-retry').classList.remove('hidden');
   // Without a finished head setup there's nothing to go back to, so offer touch controls instead.
-  $('btn-cal-back').innerHTML = `<span>${canGoBack ? 'Back to the roadmap' : 'Use touch controls instead'}</span>`;
+  $('btn-cal-back').innerHTML = `<span>${canGoBack ? (ARCADE ? 'Back to the start' : 'Back to the roadmap') : 'Use touch controls instead'}</span>`;
   $('btn-cal-back').classList.remove('hidden');
 }
 async function collectStep(title, sub, stepText, settleMs) {
@@ -401,8 +482,9 @@ async function captureRanges(keys, next) {
 }
 $('btn-cal-retry').onclick = () => S.retry?.();
 $('btn-cal-back').onclick = () => {
-  if (!S.cal) S.mode = 'touch';
-  goHome();
+  if (S.cal) return goHome();
+  S.mode = 'touch';
+  afterSetup();
 };
 
 const needsRanges = (sigs) => (S.mode === 'head' ? [...new Set(sigs)].filter((k) => FACE_SIGS.includes(k) && !S.profile.ranges[k]) : []);
@@ -414,6 +496,7 @@ const fmt = (ms) => `${(ms / 1000).toFixed(2)} s`;
 const stopTrack = (ui, li) => (ui < 0 ? raceTrack('gp') : li === 5 ? raceTrack(UNITS[ui].id) : lessonTrack(ui, li));
 
 function goHome() {
+  if (ARCADE) return arcadeHome();
   if (S.queued) send({ t: 'leave' });
   S.queued = false;
   S.local = false;
@@ -900,7 +983,7 @@ function finishLesson(tired) {
   const unit = UNITS[L.ui];
   const out = withAwards(() => recordLesson(S.profile, L.ui, L.li, sum, localDay()));
   saveProfile();
-  send({
+  sendSure({
     t: 'practice', name: S.profile.name, unit: unit.id, lesson: L.li, good: sum.good, total: sum.total,
     xp: out.xp, ms: sum.ms, reactMs: sum.reactMs, fatigue: sum.fatigue, tired,
   });
@@ -1056,6 +1139,7 @@ function goWait() {
   $('cam-slot-wait').classList.toggle('hidden', !head);
   $('btn-recal').classList.toggle('hidden', !head);
   $('sens-choices').classList.toggle('hidden', !head || !(S.level === 'gp' || S.level === 'u2'));
+  $('btn-local').classList.toggle('hidden', ARCADE);
   $('wait-pos').textContent = 'Joining the line…';
   show('s-wait');
   scene(S.track, 'showcase', 0.62);
@@ -1064,19 +1148,19 @@ function goWait() {
 }
 $('btn-recal').onclick = () => runCalibration(goWait); // keeps your place in line
 $('btn-leave').onclick = () => {
-  send({ t: 'leave' });
+  sendSure({ t: 'leave' });
   S.queued = false;
   goHome();
 };
 $('btn-local').onclick = () => {
-  send({ t: 'leave' });
+  sendSure({ t: 'leave' });
   S.queued = false;
   startRace(S.level, { local: true });
 };
 
 $('btn-start').onclick = () => {
   if (S.phase === 'turn') {
-    send({ t: 'start' });
+    sendSure({ t: 'start' });
     startCountdownView();
   }
 };
@@ -1307,7 +1391,7 @@ function raceFrame(dt, it, sig) {
       if (S.local) {
         showResult({ local: true, level: S.level, rawMs, stars: car.stars.length, finalMs: Math.max(0, rawMs - car.stars.length * STAR_BONUS_MS), stats: raceStats() });
       } else {
-        send({ t: 'finish', rawMs, stars: car.stars.length, stats: raceStats() });
+        sendFinish({ t: 'finish', rawMs, stars: car.stars.length, stats: raceStats() });
       }
     } else if (!face) {
       overlay("Can't see your face", true);
@@ -1321,6 +1405,26 @@ function raceFrame(dt, it, sig) {
   drawMinimap(car);
 }
 
+// The finish must reach the server to count: resend it until the result comes back.
+function sendFinish(msg) {
+  S.finish = msg;
+  send(msg);
+  let tries = 0;
+  clearInterval(S.finishRetry);
+  S.finishRetry = setInterval(() => (++tries > 5 ? finishUnsaved() : send(msg)), 2000);
+}
+function stopFinishRetry() {
+  clearInterval(S.finishRetry);
+  S.finish = null;
+}
+// The server never confirmed the finish: show the time anyway, marked as not saved.
+function finishUnsaved() {
+  const f = S.finish;
+  stopFinishRetry();
+  if (!f) return;
+  showResult({ unsaved: true, level: S.level, rawMs: f.rawMs, stars: f.stars, finalMs: Math.max(0, f.rawMs - f.stars * STAR_BONUS_MS), stats: f.stats });
+}
+
 $('btn-stop').onclick = () => {
   if (!S.local) send({ t: 'stop' });
   endLocalRun('You stopped the run.');
@@ -1328,6 +1432,7 @@ $('btn-stop').onclick = () => {
 
 function endLocalRun(message) {
   if (['setup', 'home', 'lesson', 'lessondone'].includes(S.phase)) return;
+  clearTimeout(lostTimer);
   S.timers.forEach(clearTimeout);
   S.timers = [];
   if (S.phase === 'racing' && S.profile) {
@@ -1345,6 +1450,8 @@ function endLocalRun(message) {
   $('res-detail').textContent = message;
   $('res-stats').innerHTML = '';
   $('res-stats-title').classList.add('hidden');
+  $('res-board').classList.add('hidden');
+  $('res-board-title').classList.add('hidden');
   $('btn-again').innerHTML = '<span data-icon="play">Try again</span>';
   mountIcons($('btn-again'));
   show('s-result');
@@ -1365,13 +1472,13 @@ function showResult(r) {
   const level = r.level || 'gp';
   const prevBest = S.profile?.bosses[level]?.bestMs;
   const ms = level === 'gp' ? r.finalMs : r.rawMs;
-  const out = S.profile ? withAwards(() => recordBoss(S.profile, level, { ms: r.rawMs, finished: true }, localDay())) : { xp: 0 };
+  const out = S.profile && !ARCADE ? withAwards(() => recordBoss(S.profile, level, { ms: r.rawMs, finished: true }, localDay())) : { xp: 0 };
   if (S.profile && level === 'gp') {
     const b = (S.profile.bosses.gp ||= { cleared: false, bestMs: null });
     b.bestMs = b.bestMs == null ? ms : Math.min(b.bestMs, ms);
   }
   if (S.profile) saveProfile();
-  if (r.local && S.profile) send({ t: 'practice', kind: 'race', local: true, name: S.profile.name, unit: level, xp: out.xp, ms: r.rawMs });
+  if (r.local && S.profile) sendSure({ t: 'practice', kind: 'race', local: true, name: S.profile.name, unit: level, xp: out.xp, ms: r.rawMs });
   const pb = prevBest != null && ms < prevBest;
   S.timers.push(setTimeout(() => {
     overlay('');
@@ -1388,6 +1495,10 @@ function showResult(r) {
       $('res-title').textContent = 'Finished';
       banner = pb ? `New personal best, ${fmt(prevBest - ms)} faster` : 'Phone runs stay off the leaderboard';
       icon = pb ? 'star' : 'phone';
+    } else if (r.unsaved) {
+      $('res-title').textContent = 'Finished';
+      banner = "The connection dropped at the finish, so this time isn't on the leaderboard";
+      icon = 'wifi';
     } else {
       $('res-title').textContent = 'Finished';
       icon = r.personalBest ? 'star' : 'flag';
@@ -1410,6 +1521,9 @@ function showResult(r) {
     $('res-stats-title').classList.remove('hidden');
     $('btn-again').innerHTML = `<span data-icon="play">${r.local ? 'Race again on this phone' : 'Race again'}</span>`;
     mountIcons($('btn-again'));
+    if (ARCADE) renderBoard($('res-board'), S.board.fastest.slice(0, 5), S.name);
+    $('res-board').classList.toggle('hidden', !ARCADE);
+    $('res-board-title').classList.toggle('hidden', !ARCADE);
     show('s-result');
     scene(S.track, 'showcase', 0.62);
     $('s-result').querySelector('.sheet').scrollTop = 0;
@@ -1419,6 +1533,76 @@ function showResult(r) {
 
 $('btn-again').onclick = () => startRace(S.level, { local: S.local });
 $('btn-res-path').onclick = goHome;
+
+// ---------- Arcade ----------
+function renderBoard(el, rows, me = '') {
+  const key = me.toLowerCase();
+  el.innerHTML = rows.length
+    ? rows.map((r, i) => {
+        const tag = r.assist ? `<span class="tag">${esc(ASSIST[r.assist]?.name ?? '')}</span>` : '';
+        const cls = [i === 0 ? 'first' : '', key && r.name.toLowerCase() === key ? 'me' : ''].join(' ').trim();
+        return `<li class="${cls}"><span class="n">${i + 1}</span><span class="who">${esc(r.name)}${tag}</span><span class="t">${fmt(r.ms)}</span></li>`;
+      }).join('')
+    : '<li class="empty">No times yet. Be the first.</li>';
+}
+// First screen: show the time to beat on the Arcade card.
+function renderChooser() {
+  const top = S.board.fastest[0];
+  $('c-top').textContent = top ? `Time to beat: ${top.name}, ${fmt(top.ms)}` : '';
+  $('c-top').classList.toggle('hidden', !top);
+}
+function renderArcadeCar() {
+  $('a-car').textContent = S.carOnline ? 'The real car is connected and drives with you.' : 'The real car is offline, so races run on screen.';
+}
+function renderArcade() {
+  renderBoard($('a-fastest'), S.board.fastest);
+  $('a-improved').innerHTML = S.board.improved.length
+    ? S.board.improved.map((r, i) => `<li><span class="n">${i + 1}</span><span class="who">${esc(r.name)}</span><span class="t">−${fmt(r.gainMs)}</span></li>`).join('')
+    : '<li class="empty">Race twice to show up here.</li>';
+  renderArcadeCar();
+}
+// Home in the arcade is "next player": nothing from the last person is kept.
+function arcadeHome() {
+  if (S.queued) sendSure({ t: 'leave' });
+  S.queued = false;
+  S.local = false;
+  S.phase = 'home';
+  S.timers.forEach(clearTimeout);
+  S.timers = [];
+  overlay('');
+  S.name = '';
+  S.profile = null;
+  S.cal = null;
+  S.mode = 'head';
+  $('a-name').value = '';
+  $('a-error').classList.add('hidden');
+  renderArcade();
+  show('s-arcade');
+  scene(raceTrack('gp'), 'preview', 0.64);
+  world?.reset();
+}
+$('btn-a-play').onclick = () => {
+  const name = $('a-name').value.replace(/\s+/g, ' ').trim();
+  if (!name) {
+    $('a-error').textContent = 'Type a name for the leaderboard.';
+    $('a-error').classList.remove('hidden');
+    $('a-name').focus();
+    return;
+  }
+  S.name = name;
+  S.profile = { ...newProfile(name, localDay()), name }; // throwaway: never saved
+  S.assist = 0; // the arcade is always no help, so every time on the board is comparable
+  S.mode = 'head';
+  S.cal = null;
+  if (tracker.lm) return runCalibration(afterSetup); // camera already on from the last player
+  show('s-camera');
+};
+$('a-name').addEventListener('keydown', (e) => e.key === 'Enter' && $('btn-a-play').click());
+if (ARCADE) {
+  $('btn-res-path').innerHTML = '<span data-icon="people">Next player</span>';
+  mountIcons($('btn-res-path'));
+  document.title = 'Head Racer Arcade';
+}
 
 // ---------- Menu: progress, achievements, settings, about ----------
 function openMenu(tab = 'progress') {
@@ -1575,4 +1759,6 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && S.phase !== 'setup') keepAwake();
 });
 
+if (ARCADE) arcadeHome();
+else if (PATH) show('s-name');
 connect();

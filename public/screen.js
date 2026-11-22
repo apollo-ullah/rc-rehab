@@ -74,99 +74,128 @@ function parkCar() {
   world?.setCar(newCar(raceTrack(level)));
 }
 
-let ws;
-function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', role: 'screen', admin: adminKey }));
-  ws.onclose = () => setTimeout(connect, 1000);
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    switch (m.t) {
-      case 'hello':
-        $('admin').classList.toggle('hidden', !m.admin);
-        setPublicUrl(m.publicUrl);
-        break;
-      case 'lobby': {
-        setPublicUrl(m.publicUrl);
-        $('car-lamp').className = `lamp${m.carOnline ? ' on' : ''}`;
-        $('car-text').textContent = m.carOnline ? 'Real car connected' : 'Real car offline. Races still run on screen.';
-        $('queue').innerHTML = m.queue.length
-          ? m.queue.map((n, i) => `<li><span class="n">${i + 1}</span><span class="name">${esc(n)}</span><span></span></li>`).join('')
-          : '<li class="empty">Nobody in line.</li>';
-        if (!m.current) {
-          live.active = false;
-          setNow('Waiting for a driver');
-        } else if (m.current.phase === 'claim') {
-          showCourse(m.current.level);
-          setNow(`${esc(m.current.name)}, it's your turn${lvl(m.current.level, m.current.levelName)}`);
-        }
-        break;
-      }
-      case 'practice_board':
-        $('pr-reps').textContent = m.reps;
-        $('pr-min').textContent = m.minutes;
-        $('pr-people').innerHTML = m.people.length
-          ? m.people.map((r, i) => `<li class="${i === 0 ? 'first' : ''}"><span class="n">${i + 1}</span><span class="name">${esc(r.name)}</span><span class="t">${r.xp} XP</span></li>`).join('')
-          : '<li class="empty">No practice yet today.</li>';
-        $('pr-feed').innerHTML = m.feed.map((f) => `<li><b>${esc(f.name)}</b> ${esc(f.text)}</li>`).join('');
-        break;
-      case 'board':
-        $('fastest').innerHTML = m.fastest.length
-          ? m.fastest
-              .map((r, i) => `<li class="${i === 0 ? 'first' : ''}"><span class="n">${i + 1}</span><span class="name">${esc(r.name)}${r.assist ? `<span class="tag">${ASSIST[r.assist].name}</span>` : ''}</span><span class="t">${fmt(r.ms)}</span></li>`)
-              .join('')
-          : '<li class="empty">No finished runs yet. Be the first.</li>';
-        $('improved').innerHTML = m.improved.length
-          ? m.improved.map((r, i) => `<li><span class="n">${i + 1}</span><span class="name">${esc(r.name)}</span><span class="t">−${fmt(r.gainMs)}</span></li>`).join('')
-          : '<li class="empty">Race twice to show up here.</li>';
-        break;
-      case 'countdown':
-        showCourse(m.level);
-        if (m.n === 3) parkCar();
-        live.active = false;
-        setNow(`${esc(m.name)} is lining up${lvl(m.level, m.levelName)}`);
-        big(String(m.n));
-        break;
-      case 'go':
-        big('GO', 800);
-        break;
-      case 'live': {
-        const wasAir = live.air;
-        const newStars = m.stars.filter((s) => !live.stars.includes(s));
-        if (!live.active) live.stars = [];
-        if ((m.level || 'gp') !== level) showCourse(m.level);
-        Object.assign(live, { active: true, name: m.name, level: m.level, levelName: m.levelName, elapsedMs: m.elapsedMs, at: performance.now() });
-        world?.setCar({ x: m.x, y: m.y, z: m.z, h: m.h, v: m.v, steer: m.steer, air: m.air, boost: m.boost });
-        if (world) {
-          if (!wasAir && m.air) world.fx({ launch: true });
-          if (wasAir && !m.air) world.fx({ land: 0.5 });
-          if (m.boost && !live.boost) world.fx({ boost: true });
-          newStars.forEach((s) => world.fx({ star: s }));
-          world.setStars(m.stars);
-        }
-        Object.assign(live, { air: m.air, boost: m.boost, stars: m.stars });
-        break;
-      }
-      case 'finished':
-        live.active = false;
-        if (m.level && m.level !== 'gp') {
-          big(`${m.name}\ncleared ${m.levelName}!`, 5000, true);
-          setNow(`${esc(m.name)} cleared <span class="time">${esc(m.levelName)}</span>`);
-        } else {
-          big(`${m.name}\n${fmt(m.finalMs)}`, 5000, true);
-          setNow(`${esc(m.name)} finished in <span class="time">${fmt(m.finalMs)}</span>`);
-        }
-        break;
-      case 'run_end':
-        live.active = false;
-        big(`${m.name ?? 'Run'}: ${m.reason.replace(/_/g, ' ')}`, 3000, true);
-        break;
-    }
+// `ws` is the socket in use; a replacement (`spare`) takes over once the server says hello on it.
+let ws = null;
+let spare = null;
+let connAt = 0;
+let freshMs = 0; // the cloud host cuts connections after a while: replace one older than this before a turn
+function openSocket() {
+  const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws`);
+  sock.onopen = () => sock.send(JSON.stringify({ t: 'hello', role: 'screen', admin: adminKey }));
+  sock.onclose = () => {
+    if (sock === spare) spare = null;
+    if (sock === ws) ws = null;
+    if (!ws && !spare) setTimeout(connect, 1000);
   };
+  sock.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (sock !== ws) {
+      if (sock !== spare || m.t !== 'hello') return;
+      const old = ws;
+      ws = sock;
+      spare = null;
+      connAt = Date.now();
+      if (old && old.readyState < 2) old.close();
+    }
+    onMessage(m);
+  };
+  return sock;
+}
+function connect() {
+  if (!spare) spare = openSocket();
+}
+function onMessage(m) {
+  switch (m.t) {
+    case 'hello':
+      freshMs = m.freshMs || 0;
+      $('admin').classList.toggle('hidden', !m.admin);
+      setPublicUrl(m.publicUrl);
+      break;
+    case 'lobby': {
+      // A turn is starting: replace an old connection now so the host's time limit can't cut the race.
+      if (freshMs && m.current?.phase === 'claim' && ws && !spare && Date.now() - connAt > freshMs) spare = openSocket();
+      setPublicUrl(m.publicUrl);
+      $('car-lamp').className = `lamp${m.carOnline ? ' on' : ''}`;
+      $('car-text').textContent = m.carOnline ? 'Real car connected' : 'Real car offline. Races still run on screen.';
+      $('queue').innerHTML = m.queue.length
+        ? m.queue.map((n, i) => `<li><span class="n">${i + 1}</span><span class="name">${esc(n)}</span><span></span></li>`).join('')
+        : '<li class="empty">Nobody in line.</li>';
+      if (!m.current) {
+        live.active = false;
+        setNow('Waiting for a driver');
+      } else if (m.current.phase === 'claim') {
+        showCourse(m.current.level);
+        setNow(`${esc(m.current.name)}, it's your turn${lvl(m.current.level, m.current.levelName)}`);
+      }
+      break;
+    }
+    case 'practice_board':
+      $('pr-reps').textContent = m.reps;
+      $('pr-min').textContent = m.minutes;
+      $('pr-people').innerHTML = m.people.length
+        ? m.people.map((r, i) => `<li class="${i === 0 ? 'first' : ''}"><span class="n">${i + 1}</span><span class="name">${esc(r.name)}</span><span class="t">${r.xp} XP</span></li>`).join('')
+        : '<li class="empty">No practice yet today.</li>';
+      $('pr-feed').innerHTML = m.feed.map((f) => `<li><b>${esc(f.name)}</b> ${esc(f.text)}</li>`).join('');
+      break;
+    case 'board':
+      $('fastest').innerHTML = m.fastest.length
+        ? m.fastest
+            .map((r, i) => `<li class="${i === 0 ? 'first' : ''}"><span class="n">${i + 1}</span><span class="name">${esc(r.name)}${r.assist ? `<span class="tag">${ASSIST[r.assist].name}</span>` : ''}</span><span class="t">${fmt(r.ms)}</span></li>`)
+            .join('')
+        : '<li class="empty">No finished runs yet. Be the first.</li>';
+      $('improved').innerHTML = m.improved.length
+        ? m.improved.map((r, i) => `<li><span class="n">${i + 1}</span><span class="name">${esc(r.name)}</span><span class="t">−${fmt(r.gainMs)}</span></li>`).join('')
+        : '<li class="empty">Race twice to show up here.</li>';
+      break;
+    case 'countdown':
+      showCourse(m.level);
+      if (m.n === 3) parkCar();
+      live.active = false;
+      setNow(`${esc(m.name)} is lining up${lvl(m.level, m.levelName)}`);
+      big(String(m.n));
+      break;
+    case 'go':
+      big('GO', 800);
+      break;
+    case 'live': {
+      const wasAir = live.air;
+      const newStars = m.stars.filter((s) => !live.stars.includes(s));
+      if (!live.active) live.stars = [];
+      if ((m.level || 'gp') !== level) showCourse(m.level);
+      Object.assign(live, { active: true, name: m.name, level: m.level, levelName: m.levelName, elapsedMs: m.elapsedMs, at: performance.now() });
+      world?.setCar({ x: m.x, y: m.y, z: m.z, h: m.h, v: m.v, steer: m.steer, air: m.air, boost: m.boost });
+      if (world) {
+        if (!wasAir && m.air) world.fx({ launch: true });
+        if (wasAir && !m.air) world.fx({ land: 0.5 });
+        if (m.boost && !live.boost) world.fx({ boost: true });
+        newStars.forEach((s) => world.fx({ star: s }));
+        world.setStars(m.stars);
+      }
+      Object.assign(live, { air: m.air, boost: m.boost, stars: m.stars });
+      break;
+    }
+    case 'finished':
+      live.active = false;
+      if (m.level && m.level !== 'gp') {
+        big(`${m.name}\ncleared ${m.levelName}!`, 5000, true);
+        setNow(`${esc(m.name)} cleared <span class="time">${esc(m.levelName)}</span>`);
+      } else {
+        big(`${m.name}\n${fmt(m.finalMs)}`, 5000, true);
+        setNow(`${esc(m.name)} finished in <span class="time">${fmt(m.finalMs)}</span>`);
+      }
+      break;
+    case 'run_end':
+      live.active = false;
+      big(`${m.name ?? 'Run'}: ${m.reason.replace(/_/g, ' ')}`, 3000, true);
+      break;
+  }
 }
 
-$('btn-stop').onclick = () => ws.send(JSON.stringify({ t: 'admin', action: 'stop' }));
-$('btn-clear').onclick = () => ws.send(JSON.stringify({ t: 'admin', action: 'clear_queue' }));
+$('btn-stop').onclick = () => ws?.send(JSON.stringify({ t: 'admin', action: 'stop' }));
+$('btn-clear').onclick = () => ws?.send(JSON.stringify({ t: 'admin', action: 'clear_queue' }));
+$('btn-reset').onclick = () => {
+  if (confirm('Delete every saved race time and the whole practice log? This cannot be undone.')) ws?.send(JSON.stringify({ t: 'admin', action: 'reset_board' }));
+};
 if (adminKey) $('csv').href = `/api/practice.csv?admin=${encodeURIComponent(adminKey)}`;
 
 fetch('/api/info')
