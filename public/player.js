@@ -1878,6 +1878,7 @@ function armCheckFrame(sig, dt) {
   const c = S.armCheck;
   if (c.online !== armOnline()) renderArmStatus();
   liveMc();
+  $('btn-ac-race').disabled = mcBusy || !mc.ready || !S.tune.follow || !c.done;
   const st = ARM_STEPS[c.step];
   if (st && st.ok(sig)) {
     c.t += dt * 1000;
@@ -1900,6 +1901,10 @@ const leaveArmCheck = () => {
   next();
 };
 $('btn-ac-go').onclick = leaveArmCheck;
+$('btn-ac-race').onclick = () => {
+  if (mcBusy || !mc.ready || !S.armCheck?.done || !S.tune.follow) return;
+  startRace('a4', { local: true });
+};
 $('btn-ac-keys').onclick = () => {
   S.armManual = true;
   toast('Keys and buttons on: hold A or D, or the Left and Right lights', { icon: 'hand' });
@@ -1914,6 +1919,7 @@ $('ac-swap').onchange = (e) => {
 // turns (after walls), turned into power for the left and right wheels (arms.js wheelMix).
 const bleDriving = () => ARMS && mc.connected && S.tune.follow && S.local;
 function mirrorRealCar() {
+  if (!mc.online) return setWheels(0, 0);
   if (S.phase === 'demo') return setWheels(S.demo.w.l, S.demo.w.r);
   let car = null;
   if (ARMS && S.tune.follow) {
