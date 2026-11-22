@@ -2120,8 +2120,18 @@ $('btn-ac-demo').onclick = openDemo;
 if (ARMS) {
   for (const id of ['btn-demo', 'btn-name-demo']) $(id).classList.remove('hidden');
   document.title = 'RC-Rehab · Arm path';
-  $('name-hand').textContent = 'arm path';
-  $('name-intro').textContent = 'Biceps exercises with two muscle sensors that see whether each arm is flexing. Every lesson is its own little course: open each gate by squeezing or relaxing on cue, then drive on to the finish line.';
+  const welcome = $('s-name');
+  welcome.classList.add('arm-welcome');
+  welcome.querySelector('.driver-heading').hidden = false;
+  welcome.querySelector('.hero .title').textContent = 'Arm Path';
+  $('name-hand').textContent = 'RC-Rehab';
+  $('name-intro').textContent = 'Flex your biceps to steer the car. Squeeze and relax to open gates along the course.';
+  welcome.querySelector('.field .hint').textContent = 'Your progress is saved on this device.';
+  $('btn-name').firstElementChild.textContent = 'Start Arm Path';
+  $('btn-name-demo').firstElementChild.textContent = 'Drive in demo mode';
+  const links = welcome.querySelector('.welcome > p:last-child');
+  links.replaceChildren(...links.querySelectorAll('a'));
+  links.firstElementChild.textContent = 'All modes';
 }
 
 // ---------- Main loop ----------
